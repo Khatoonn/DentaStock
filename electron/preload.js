@@ -68,6 +68,10 @@ contextBridge.exposeInMainWorld('api', {
   dialogOpenFile: filters => ipcRenderer.invoke('dialog:openFile', filters),
   dialogOpenDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
 
+  // Base de donnees
+  dbExport: () => ipcRenderer.invoke('db:export'),
+  dbImport: () => ipcRenderer.invoke('db:import'),
+
   // Fenetre
   windowMinimize: () => ipcRenderer.send('window:minimize'),
   windowMaximize: () => ipcRenderer.send('window:maximize'),

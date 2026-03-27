@@ -1705,6 +1705,62 @@ safeHandle('dialog:openDirectory', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
+// Export / Import base de donnees
+safeHandle('db:export', async () => {
+  if (!db) throw new Error('Aucune base de donnees ouverte.')
+
+  const timestamp = new Date().toISOString().slice(0, 10)
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Exporter la base de donnees',
+    defaultPath: `dentastock-backup-${timestamp}.db`,
+    filters: [{ name: 'Base SQLite', extensions: ['db'] }],
+  })
+
+  if (result.canceled || !result.filePath) return null
+
+  saveDatabase()
+  fs.copyFileSync(dbPath, result.filePath)
+  return result.filePath
+})
+
+safeHandle('db:import', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Importer une base de donnees',
+    filters: [{ name: 'Base SQLite', extensions: ['db'] }],
+    properties: ['openFile'],
+  })
+
+  if (result.canceled || !result.filePaths.length) return null
+
+  const importPath = result.filePaths[0]
+
+  // Verifier que le fichier est une DB valide
+  try {
+    const testDb = new SQL.Database(fs.readFileSync(importPath))
+    const tables = testDb.exec("SELECT name FROM sqlite_master WHERE type='table'")
+    testDb.close()
+    if (!tables.length || tables[0].values.length === 0) {
+      throw new Error('Le fichier ne contient aucune table.')
+    }
+  } catch (err) {
+    throw new Error(`Fichier invalide : ${err.message}`)
+  }
+
+  // Sauvegarder l'ancienne DB avant ecrasement
+  const backupPath = `${dbPath}.before-import.bak`
+  if (fs.existsSync(dbPath)) {
+    fs.copyFileSync(dbPath, backupPath)
+  }
+
+  // Remplacer la DB
+  fs.copyFileSync(importPath, dbPath)
+  loadDatabaseFromFile(dbPath)
+  ensureSchema()
+  saveDatabase()
+
+  return { imported: importPath, backup: backupPath }
+})
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,

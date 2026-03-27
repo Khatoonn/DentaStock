@@ -207,6 +207,82 @@ export default function Parametres() {
         </div>
       </div>
 
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 space-y-5">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Sauvegarde et restauration</h3>
+          <p className="text-sm text-slate-400 mt-1">
+            Exportez votre base de donnees pour en faire une sauvegarde, ou importez une sauvegarde existante.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-5 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-white">Exporter la base</div>
+                <div className="text-xs text-slate-400">Sauvegarder dans un fichier .db</div>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (!isElectron) return
+                setError('')
+                setSuccess('')
+                try {
+                  const path = await window.api.dbExport()
+                  if (path) setSuccess(`Base exportee vers : ${path}`)
+                } catch (err) {
+                  setError(err.message)
+                }
+              }}
+              disabled={!isElectron}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+            >
+              Exporter...
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-5 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-white">Importer une base</div>
+                <div className="text-xs text-slate-400">Remplace la base actuelle (sauvegarde auto)</div>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (!isElectron) return
+                setError('')
+                setSuccess('')
+                try {
+                  const result = await window.api.dbImport()
+                  if (result) {
+                    setSuccess(`Base importee depuis : ${result.imported}. Sauvegarde de l'ancienne : ${result.backup}`)
+                    load()
+                  }
+                } catch (err) {
+                  setError(err.message)
+                }
+              }}
+              disabled={!isElectron}
+              className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+            >
+              Importer...
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
         <h3 className="text-base font-semibold text-white">Ce que cette version gere</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
