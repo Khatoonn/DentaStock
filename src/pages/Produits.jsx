@@ -664,11 +664,23 @@ export default function Produits() {
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   {filter.categorie ? `Categorie active: ${filter.categorie}` : 'Toutes categories'}
+                  {' - '}
+                  {filteredProduits.filter(produit => Number(produit.stock_actuel || 0) <= Number(produit.stock_minimum || 0)).length} en alerte
                 </p>
               </div>
-              <div className="text-xs text-slate-400">
-                {filteredProduits.filter(produit => Number(produit.stock_actuel || 0) <= Number(produit.stock_minimum || 0)).length} en alerte
-              </div>
+              <button
+                onClick={() => {
+                  setProductForm(createEmptyProductForm())
+                  setEditingProductId(null)
+                  setShowProductForm(true)
+                }}
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shrink-0"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Ajouter un produit
+              </button>
             </div>
 
             <div className="overflow-x-auto">
