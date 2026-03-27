@@ -24,17 +24,6 @@ const nav = [
     ),
   },
   {
-    to: '/stock',
-    label: 'Stock',
-    color: 'text-sky-400',
-    activeColor: 'bg-sky-500/20 text-sky-300 border-l-2 border-sky-400',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V7a2 2 0 00-2-2h-4m-4 0H6a2 2 0 00-2 2v6m16 0v4a2 2 0 01-2 2h-4m-4 0H6a2 2 0 01-2-2v-4m16 0H4m8-4v8" />
-      </svg>
-    ),
-  },
-  {
     to: '/consommation',
     label: 'Consommation',
     color: 'text-violet-400',
@@ -47,9 +36,9 @@ const nav = [
   },
   {
     to: '/produits',
-    label: 'Catalogue produits',
-    color: 'text-slate-400',
-    activeColor: 'bg-slate-500/20 text-slate-300 border-l-2 border-slate-400',
+    label: 'Produits & Stock',
+    color: 'text-emerald-400',
+    activeColor: 'bg-emerald-500/20 text-emerald-300 border-l-2 border-emerald-400',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />

@@ -7,7 +7,6 @@ import Consommation from './pages/Consommation'
 import Documents from './pages/Documents'
 import Fournisseurs from './pages/Fournisseurs'
 import Produits from './pages/Produits'
-import Stock from './pages/Stock'
 import Praticiens from './pages/Praticiens'
 import Parametres from './pages/Parametres'
 
@@ -23,7 +22,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/reception" element={<Reception />} />
             <Route path="/commandes" element={<Navigate to="/reception" replace />} />
-            <Route path="/stock" element={<Stock />} />
+            <Route path="/stock" element={<Navigate to="/produits" replace />} />
             <Route path="/consommation" element={<Consommation />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/produits" element={<Produits />} />
