@@ -52,12 +52,21 @@ function getUserDataPath() {
   return app.getPath('userData')
 }
 
+function getInstallDir() {
+  // En production : dossier parent de l'exe (C:\DentaStock)
+  // En dev : dossier du projet
+  if (app.isPackaged) {
+    return path.dirname(app.getPath('exe'))
+  }
+  return path.join(__dirname, '..')
+}
+
 function getDefaultDbPath() {
-  return path.join(getUserDataPath(), 'data', DB_FILENAME)
+  return path.join(getInstallDir(), 'data', DB_FILENAME)
 }
 
 function getDefaultDocumentsRoot() {
-  return path.join(getUserDataPath(), 'documents')
+  return path.join(getInstallDir(), 'data', 'documents')
 }
 
 function getConfiguredStorageRoot() {
