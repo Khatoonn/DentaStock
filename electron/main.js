@@ -768,21 +768,6 @@ function ensureSchema() {
   syncCategoriesCatalog()
 }
 
-function seedStarterData() {
-  const items = [
-    ['GANT-001', 'Gants nitrile M', null, 'boite', 8, 2, 11.5, null],
-    ['ANES-001', 'Carpules d articaine 1/100 000', null, 'boite', 6, 2, 29.0, null],
-  ]
-
-  items.forEach(item => {
-    dbRun(`INSERT INTO produits (
-      reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire, fournisseur_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, item)
-  })
-
-  dbRun('INSERT OR REPLACE INTO config (cle, valeur) VALUES (?, ?)', ['starter_seed_done', '1'])
-}
-
 async function initDatabase(targetPath) {
   dbPath = targetPath
 
@@ -799,11 +784,6 @@ async function initDatabase(targetPath) {
   ensureSchema()
   backfillReceptionPassages()
   mergeDuplicateCommandeReceptions()
-
-  const seedState = dbGet('SELECT valeur FROM config WHERE cle = ?', ['starter_seed_done'])
-  if (!seedState) {
-    seedStarterData()
-  }
 
   saveDatabase()
 }
