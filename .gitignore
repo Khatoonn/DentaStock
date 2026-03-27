@@ -1,7 +1,11 @@
 node_modules/
 dist/
+data/
 *.exe
 *.blockmap
 *.yaml
 .env
 *.log
+*.db
+*.db.lock
+*.bak
