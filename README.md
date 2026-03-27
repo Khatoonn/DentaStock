@@ -2,6 +2,8 @@
 
 Application de gestion de stock pour cabinet dentaire. Installable en local sur Windows, avec possibilite future de fonctionnement en reseau local (serveur/client).
 
+**[Telecharger l'installateur Windows (v1.0.0)](https://github.com/Khatoonn/DentaStock/releases/latest)**
+
 ## Fonctionnalites
 
 - **Tableau de bord** - Vue d'ensemble : alertes stock, commandes en cours, receptions recentes, KPI mensuels
