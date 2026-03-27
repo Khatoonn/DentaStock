@@ -755,6 +755,11 @@ function ensureSchema() {
   ensureColumn('fournisseurs', 'contact_commercial', 'TEXT')
   ensureColumn('receptions', 'commande_id', 'INTEGER')
 
+  // Colonnes d'archivage
+  ensureColumn('produits', 'archived', 'INTEGER DEFAULT 0')
+  ensureColumn('fournisseurs', 'archived', 'INTEGER DEFAULT 0')
+  ensureColumn('praticiens', 'archived', 'INTEGER DEFAULT 0')
+
   // Index sur les clés étrangères pour accélérer les jointures
   db.run('CREATE INDEX IF NOT EXISTS idx_produits_fournisseur ON produits(fournisseur_id)')
   db.run('CREATE INDEX IF NOT EXISTS idx_produits_categorie ON produits(categorie)')
@@ -883,7 +888,31 @@ safeHandle('storage:setRoot', async (_, rootPath) => {
 })
 
 // Fournisseurs
-safeHandle('fournisseurs:list', () => dbAll('SELECT * FROM fournisseurs ORDER BY nom'))
+safeHandle('fournisseurs:list', () => dbAll('SELECT * FROM fournisseurs WHERE archived = 0 ORDER BY nom'))
+
+safeHandle('fournisseurs:listArchived', () => dbAll('SELECT * FROM fournisseurs WHERE archived = 1 ORDER BY nom'))
+
+safeHandle('fournisseurs:archive', async (_, id) => {
+  await withWriteTransaction(() => {
+    dbRun('UPDATE fournisseurs SET archived = 1 WHERE id = ?', [id])
+  })
+})
+
+safeHandle('fournisseurs:restore', async (_, id) => {
+  await withWriteTransaction(() => {
+    dbRun('UPDATE fournisseurs SET archived = 0 WHERE id = ?', [id])
+  })
+})
+
+safeHandle('fournisseurs:delete', async (_, id) => {
+  await withWriteTransaction(() => {
+    const linked = dbGet('SELECT COUNT(*) AS c FROM produits WHERE fournisseur_id = ?', [id])
+    if (linked && linked.c > 0) {
+      throw new Error('Ce fournisseur est lie a des produits existants et ne peut pas etre supprime definitivement.')
+    }
+    dbRun('DELETE FROM fournisseurs WHERE id = ?', [id])
+  })
+})
 
 safeHandle('fournisseurs:add', async (_, data) => {
   return withWriteTransaction(() => {
@@ -962,7 +991,39 @@ safeHandle('produits:list', () => {
   return dbAll(`SELECT p.*, f.nom AS fournisseur_nom
     FROM produits p
     LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
+    WHERE p.archived = 0
     ORDER BY p.nom`)
+})
+
+safeHandle('produits:listArchived', () => {
+  return dbAll(`SELECT p.*, f.nom AS fournisseur_nom
+    FROM produits p
+    LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
+    WHERE p.archived = 1
+    ORDER BY p.nom`)
+})
+
+safeHandle('produits:archive', async (_, id) => {
+  await withWriteTransaction(() => {
+    dbRun('UPDATE produits SET archived = 1 WHERE id = ?', [id])
+  })
+})
+
+safeHandle('produits:restore', async (_, id) => {
+  await withWriteTransaction(() => {
+    dbRun('UPDATE produits SET archived = 0 WHERE id = ?', [id])
+  })
+})
+
+safeHandle('produits:delete', async (_, id) => {
+  await withWriteTransaction(() => {
+    const linked = dbGet('SELECT COUNT(*) AS c FROM commande_items WHERE produit_id = ?', [id])
+    const linked2 = dbGet('SELECT COUNT(*) AS c FROM utilisation_items WHERE produit_id = ?', [id])
+    if ((linked && linked.c > 0) || (linked2 && linked2.c > 0)) {
+      throw new Error('Ce produit est lie a des commandes ou consommations et ne peut pas etre supprime definitivement. Archivez-le a la place.')
+    }
+    dbRun('DELETE FROM produits WHERE id = ?', [id])
+  })
 })
 
 safeHandle('produits:add', async (_, data) => {
@@ -1202,7 +1263,21 @@ safeHandle('commandes:updateStatus', async (_, id, statut) => {
 })
 
 // Praticiens
-safeHandle('praticiens:list', () => dbAll('SELECT * FROM praticiens ORDER BY nom'))
+safeHandle('praticiens:list', () => dbAll('SELECT * FROM praticiens WHERE archived = 0 ORDER BY nom'))
+
+safeHandle('praticiens:listArchived', () => dbAll('SELECT * FROM praticiens WHERE archived = 1 ORDER BY nom'))
+
+safeHandle('praticiens:archive', async (_, id) => {
+  await withWriteTransaction(() => {
+    dbRun('UPDATE praticiens SET archived = 1 WHERE id = ?', [id])
+  })
+})
+
+safeHandle('praticiens:restore', async (_, id) => {
+  await withWriteTransaction(() => {
+    dbRun('UPDATE praticiens SET archived = 0 WHERE id = ?', [id])
+  })
+})
 
 safeHandle('praticiens:add', async (_, data) => {
   return withWriteTransaction(() => {
@@ -1226,7 +1301,7 @@ safeHandle('praticiens:delete', async (_, id) => {
   await withWriteTransaction(() => {
     const linked = dbGet('SELECT COUNT(*) AS c FROM utilisations WHERE praticien_id = ?', [id])
     if (linked && linked.c > 0) {
-      throw new Error('Ce praticien est lie a des consommations existantes et ne peut pas etre supprime.')
+      throw new Error('Ce praticien est lie a des consommations existantes et ne peut pas etre supprime definitivement. Archivez-le a la place.')
     }
     dbRun('DELETE FROM praticiens WHERE id = ?', [id])
   })

@@ -11,8 +11,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // Fournisseurs
   fournisseursList: () => ipcRenderer.invoke('fournisseurs:list'),
+  fournisseursListArchived: () => ipcRenderer.invoke('fournisseurs:listArchived'),
   fournisseursAdd: data => ipcRenderer.invoke('fournisseurs:add', data),
   fournisseursUpdate: (id, data) => ipcRenderer.invoke('fournisseurs:update', id, data),
+  fournisseursArchive: id => ipcRenderer.invoke('fournisseurs:archive', id),
+  fournisseursRestore: id => ipcRenderer.invoke('fournisseurs:restore', id),
+  fournisseursDelete: id => ipcRenderer.invoke('fournisseurs:delete', id),
 
   // Categories
   categoriesList: () => ipcRenderer.invoke('categories:list'),
@@ -22,8 +26,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // Produits
   produitsList: () => ipcRenderer.invoke('produits:list'),
+  produitsListArchived: () => ipcRenderer.invoke('produits:listArchived'),
   produitsAdd: data => ipcRenderer.invoke('produits:add', data),
   produitsUpdate: (id, data) => ipcRenderer.invoke('produits:update', id, data),
+  produitsArchive: id => ipcRenderer.invoke('produits:archive', id),
+  produitsRestore: id => ipcRenderer.invoke('produits:restore', id),
+  produitsDelete: id => ipcRenderer.invoke('produits:delete', id),
   produitsHistory: id => ipcRenderer.invoke('produits:history', id),
 
   // Commandes
@@ -35,8 +43,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // Praticiens
   praticiensList: () => ipcRenderer.invoke('praticiens:list'),
+  praticiensListArchived: () => ipcRenderer.invoke('praticiens:listArchived'),
   praticiensAdd: data => ipcRenderer.invoke('praticiens:add', data),
   praticiensUpdate: (id, data) => ipcRenderer.invoke('praticiens:update', id, data),
+  praticiensArchive: id => ipcRenderer.invoke('praticiens:archive', id),
+  praticiensRestore: id => ipcRenderer.invoke('praticiens:restore', id),
   praticiensDelete: id => ipcRenderer.invoke('praticiens:delete', id),
 
   // Receptions

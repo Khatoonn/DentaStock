@@ -80,6 +80,8 @@ export default function Produits() {
   const [savingCategory, setSavingCategory] = useState(false)
   const [message, setMessage] = useState(null)
   const [filter, setFilter] = useState({ categorie: '', search: '', alerte: false })
+  const [tab, setTab] = useState('actifs')
+  const [archivedProduits, setArchivedProduits] = useState([])
 
   const load = async () => {
     if (isElectron) {
@@ -89,7 +91,9 @@ export default function Produits() {
         window.api.categoriesList(),
       ])
 
+      const nextArchived = await window.api.produitsListArchived()
       setProduits(nextProduits)
+      setArchivedProduits(nextArchived)
       setFournisseurs(nextFournisseurs)
       setCategories(nextCategories)
       return
@@ -299,6 +303,42 @@ export default function Produits() {
       })
     }
   }
+
+  const archiveProduct = async (produit) => {
+    const confirmed = window.confirm(`Archiver "${produit.nom}" ? Il sera retire de la liste active mais conserve dans les archives.`)
+    if (!confirmed) return
+    try {
+      if (isElectron) await window.api.produitsArchive(produit.id)
+      await load()
+      clearMessageLater({ tone: 'success', text: `"${produit.nom}" archive.` })
+    } catch (error) {
+      clearMessageLater({ tone: 'error', text: error.message })
+    }
+  }
+
+  const restoreProduct = async (produit) => {
+    try {
+      if (isElectron) await window.api.produitsRestore(produit.id)
+      await load()
+      clearMessageLater({ tone: 'success', text: `"${produit.nom}" restaure.` })
+    } catch (error) {
+      clearMessageLater({ tone: 'error', text: error.message })
+    }
+  }
+
+  const deleteProduct = async (produit) => {
+    const confirmed = window.confirm(`Supprimer definitivement "${produit.nom}" ? Cette action est irreversible.`)
+    if (!confirmed) return
+    try {
+      if (isElectron) await window.api.produitsDelete(produit.id)
+      await load()
+      clearMessageLater({ tone: 'success', text: `"${produit.nom}" supprime definitivement.` })
+    } catch (error) {
+      clearMessageLater({ tone: 'error', text: error.message })
+    }
+  }
+
+  const displayedProduits = tab === 'archives' ? archivedProduits : filteredProduits
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -658,29 +698,45 @@ export default function Produits() {
 
           <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden min-w-0">
             <div className="px-5 py-4 border-b border-slate-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-white">
-                  Catalogue produits ({filteredProduits.length})
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  {filter.categorie ? `Categorie active: ${filter.categorie}` : 'Toutes categories'}
-                  {' - '}
-                  {filteredProduits.filter(produit => Number(produit.stock_actuel || 0) <= Number(produit.stock_minimum || 0)).length} en alerte
-                </p>
+              <div className="flex items-center gap-4">
+                <div className="flex rounded-lg bg-slate-900/60 p-0.5">
+                  <button
+                    onClick={() => setTab('actifs')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'actifs' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Actifs ({filteredProduits.length})
+                  </button>
+                  <button
+                    onClick={() => setTab('archives')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'archives' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Archives ({archivedProduits.length})
+                  </button>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">
+                    {tab === 'actifs'
+                      ? `${filter.categorie ? `Categorie: ${filter.categorie}` : 'Toutes categories'} - ${filteredProduits.filter(p => Number(p.stock_actuel || 0) <= Number(p.stock_minimum || 0)).length} en alerte`
+                      : `${archivedProduits.length} produit${archivedProduits.length > 1 ? 's' : ''} archive${archivedProduits.length > 1 ? 's' : ''}`
+                    }
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={() => {
-                  setProductForm(createEmptyProductForm())
-                  setEditingProductId(null)
-                  setShowProductForm(true)
-                }}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shrink-0"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Ajouter un produit
-              </button>
+              {tab === 'actifs' && (
+                <button
+                  onClick={() => {
+                    setProductForm(createEmptyProductForm())
+                    setEditingProductId(null)
+                    setShowProductForm(true)
+                  }}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shrink-0"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Ajouter un produit
+                </button>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -710,27 +766,34 @@ export default function Produits() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-700/50">
-                  {filteredProduits.length === 0 ? (
+                  {displayedProduits.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="text-center py-10 text-slate-500">
-                        Aucun produit trouve avec ces filtres.
+                        {tab === 'archives' ? 'Aucun produit archive.' : 'Aucun produit trouve avec ces filtres.'}
                       </td>
                     </tr>
                   ) : (
-                    filteredProduits.map(produit => {
+                    displayedProduits.map(produit => {
                       const status = stockStatus(produit)
 
                       return (
-                        <tr key={produit.id} className="hover:bg-slate-700/30 transition-colors">
+                        <tr key={produit.id} className={`hover:bg-slate-700/30 transition-colors ${tab === 'archives' ? 'opacity-70' : ''}`}>
                           <td className="py-3 px-4 text-slate-400 font-mono text-xs truncate" title={produit.reference || '-'}>
                             {produit.reference || '-'}
                           </td>
 
                           <td className="py-3 px-4 font-medium text-white">
                             <div className="truncate" title={produit.nom}>{produit.nom}</div>
-                            <div className={`mt-1 inline-flex text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${status.cls}`}>
-                              {status.label}
-                            </div>
+                            {tab === 'actifs' && (
+                              <div className={`mt-1 inline-flex text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${status.cls}`}>
+                                {status.label}
+                              </div>
+                            )}
+                            {tab === 'archives' && (
+                              <div className="mt-1 inline-flex text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap bg-slate-700 text-slate-400">
+                                Archive
+                              </div>
+                            )}
                           </td>
 
                           <td className="py-3 px-3">
@@ -760,12 +823,44 @@ export default function Produits() {
                           </td>
 
                           <td className="py-3 px-3 text-center">
-                            <button
-                              onClick={() => openProductEditor(produit)}
-                              className="text-xs text-emerald-300 hover:text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              Modifier
-                            </button>
+                            {tab === 'actifs' ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() => openProductEditor(produit)}
+                                  className="text-xs text-emerald-300 hover:text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1.5 rounded-lg transition-colors"
+                                  title="Modifier"
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  onClick={() => archiveProduct(produit)}
+                                  className="text-slate-400 hover:text-amber-400 transition-colors p-1.5"
+                                  title="Archiver"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() => restoreProduct(produit)}
+                                  className="text-xs text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 px-2 py-1.5 rounded-lg transition-colors"
+                                >
+                                  Restaurer
+                                </button>
+                                <button
+                                  onClick={() => deleteProduct(produit)}
+                                  className="text-slate-400 hover:text-red-400 transition-colors p-1.5"
+                                  title="Supprimer definitivement"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )
