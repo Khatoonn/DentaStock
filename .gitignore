@@ -9,3 +9,4 @@ data/
 *.db
 *.db.lock
 *.bak
+dentastock-config.json

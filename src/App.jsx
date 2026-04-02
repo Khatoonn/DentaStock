@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
@@ -9,8 +10,37 @@ import Fournisseurs from './pages/Fournisseurs'
 import Produits from './pages/Produits'
 import Praticiens from './pages/Praticiens'
 import Parametres from './pages/Parametres'
+import Setup from './pages/Setup'
+
+const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
 export default function App() {
+  const [setupDone, setSetupDone] = useState(null) // null = loading, true/false
+
+  useEffect(() => {
+    if (!isElectron) {
+      setSetupDone(true)
+      return
+    }
+    window.api.setupGetConfig().then(config => {
+      setSetupDone(config !== null)
+    })
+  }, [])
+
+  // Loading
+  if (setupDone === null) {
+    return (
+      <div className="flex h-screen bg-slate-900 items-center justify-center">
+        <div className="text-slate-400 text-sm">Chargement...</div>
+      </div>
+    )
+  }
+
+  // Setup screen
+  if (!setupDone) {
+    return <Setup onComplete={() => setSetupDone(true)} />
+  }
+
   return (
     <div className="flex h-screen bg-slate-900 overflow-hidden">
       <Sidebar />

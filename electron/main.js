@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const zlib = require('zlib')
 
 // Empêcher les crashs silencieux
 process.on('uncaughtException', (error) => {
@@ -17,6 +18,7 @@ process.on('unhandledRejection', (reason) => {
 
 const DB_FILENAME = 'dentastock.db'
 const LOCK_STALE_MS = 30_000
+const SETUP_CONFIG_FILENAME = 'dentastock-config.json'
 
 let SQL = null
 let db = null
@@ -26,6 +28,7 @@ let dbFileMtime = 0
 let dbConfigFile = ''
 let storageConfigFile = ''
 let inWriteTransaction = false
+let setupConfig = null
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -59,6 +62,196 @@ function getInstallDir() {
     return path.dirname(app.getPath('exe'))
   }
   return path.join(__dirname, '..')
+}
+
+function getSetupConfigPath() {
+  return path.join(getInstallDir(), SETUP_CONFIG_FILENAME)
+}
+
+function loadSetupConfig() {
+  const configPath = getSetupConfigPath()
+  if (fs.existsSync(configPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+    } catch { /* corrupt config, treat as unconfigured */ }
+  }
+  return null
+}
+
+function saveSetupConfig(config) {
+  const configPath = getSetupConfigPath()
+  ensureDirectory(path.dirname(configPath))
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+  setupConfig = config
+}
+
+// --- Replication client ---
+let replicaInterval = null
+
+function getReplicaDir() {
+  return path.join(getInstallDir(), 'data', 'replica')
+}
+
+function getReplicaDbPath() {
+  return path.join(getReplicaDir(), DB_FILENAME)
+}
+
+function replicateFromServer() {
+  if (!setupConfig || setupConfig.mode !== 'client' || !setupConfig.dataPath) return false
+
+  const serverDb = path.join(setupConfig.dataPath, DB_FILENAME)
+  try {
+    if (!fs.existsSync(serverDb)) return false
+
+    const replicaDir = ensureDirectory(getReplicaDir())
+    const replicaPath = path.join(replicaDir, DB_FILENAME)
+    fs.copyFileSync(serverDb, replicaPath)
+
+    // Stocker la date de derniere synchro
+    const metaPath = path.join(replicaDir, 'last-sync.txt')
+    fs.writeFileSync(metaPath, new Date().toISOString(), 'utf-8')
+
+    console.log('[DentaStock] Replica synchronisee depuis le serveur')
+    return true
+  } catch (err) {
+    console.error('[DentaStock] Echec replica:', err.message)
+    return false
+  }
+}
+
+function startReplicaSync(intervalMs = 5 * 60 * 1000) {
+  if (replicaInterval) clearInterval(replicaInterval)
+  // Synchro initiale
+  replicateFromServer()
+  // Synchro periodique
+  replicaInterval = setInterval(() => replicateFromServer(), intervalMs)
+}
+
+function isServerReachable() {
+  if (!setupConfig || setupConfig.mode !== 'client' || !setupConfig.dataPath) return true
+  try {
+    return fs.existsSync(path.join(setupConfig.dataPath, DB_FILENAME))
+  } catch {
+    return false
+  }
+}
+
+function getClientDbPath() {
+  // Essayer le serveur, sinon fallback sur la replica locale
+  const serverDb = path.join(setupConfig.dataPath, DB_FILENAME)
+  try {
+    if (fs.existsSync(serverDb)) return serverDb
+  } catch { /* serveur inaccessible */ }
+
+  const replicaPath = getReplicaDbPath()
+  if (fs.existsSync(replicaPath)) {
+    console.log('[DentaStock] Serveur inaccessible, utilisation de la replica locale')
+    return replicaPath
+  }
+  throw new Error('Impossible de se connecter au serveur et aucune replica locale disponible.')
+}
+
+// --- Sauvegarde mensuelle automatique ---
+function getBackupDir() {
+  return path.join(getInstallDir(), 'data', 'backups')
+}
+
+function getLastMonthlyBackupDate() {
+  const metaPath = path.join(getBackupDir(), 'last-monthly-backup.txt')
+  if (!fs.existsSync(metaPath)) return null
+  const dateStr = fs.readFileSync(metaPath, 'utf-8').trim()
+  const d = new Date(dateStr)
+  return isNaN(d.getTime()) ? null : d
+}
+
+function setLastMonthlyBackupDate() {
+  const backupDir = ensureDirectory(getBackupDir())
+  fs.writeFileSync(path.join(backupDir, 'last-monthly-backup.txt'), new Date().toISOString(), 'utf-8')
+}
+
+function runMonthlyBackupIfNeeded() {
+  if (!db || !dbPath) return
+
+  const lastBackup = getLastMonthlyBackupDate()
+  const now = new Date()
+
+  // Verifier si > 30 jours depuis la derniere sauvegarde
+  if (lastBackup) {
+    const daysSince = (now.getTime() - lastBackup.getTime()) / (1000 * 60 * 60 * 24)
+    if (daysSince < 30) return
+  }
+
+  console.log('[DentaStock] Lancement de la sauvegarde mensuelle...')
+
+  try {
+    // 1. Sauvegarder la base actuelle en fichier compresse
+    const backupDir = ensureDirectory(getBackupDir())
+    const timestamp = now.toISOString().slice(0, 7) // YYYY-MM
+    const backupName = `dentastock-${timestamp}.db.gz`
+    const backupPath = path.join(backupDir, backupName)
+
+    saveDatabase()
+    const dbBuffer = fs.readFileSync(dbPath)
+    const compressed = zlib.gzipSync(dbBuffer, { level: 9 })
+    fs.writeFileSync(backupPath, compressed)
+
+    console.log(`[DentaStock] Backup cree: ${backupPath} (${(compressed.length / 1024).toFixed(0)} Ko)`)
+
+    // 2. Supprimer les anciennes sauvegardes (> 1 an)
+    const oneYearAgo = new Date(now)
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+    const backupFiles = fs.readdirSync(backupDir).filter(f => f.startsWith('dentastock-') && f.endsWith('.db.gz'))
+    for (const file of backupFiles) {
+      const match = file.match(/^dentastock-(\d{4}-\d{2})\.db\.gz$/)
+      if (match) {
+        const fileDate = new Date(match[1] + '-01')
+        if (fileDate < oneYearAgo) {
+          fs.unlinkSync(path.join(backupDir, file))
+          console.log(`[DentaStock] Ancien backup supprime: ${file}`)
+        }
+      }
+    }
+
+    // 3. Nettoyer les donnees > 1 an dans la base
+    const cutoffDate = oneYearAgo.toISOString().slice(0, 10)
+    cleanupOldData(cutoffDate)
+
+    // 4. VACUUM pour reduire la taille
+    db.run('VACUUM')
+    saveDatabase()
+
+    setLastMonthlyBackupDate()
+    console.log('[DentaStock] Sauvegarde mensuelle terminee.')
+  } catch (err) {
+    console.error('[DentaStock] Erreur sauvegarde mensuelle:', err.message)
+  }
+}
+
+function cleanupOldData(cutoffDate) {
+  // Supprimer les anciennes utilisations (consommations) et leurs items
+  db.run(`DELETE FROM utilisation_items WHERE utilisation_id IN (
+    SELECT id FROM utilisations WHERE date < ?
+  )`, [cutoffDate])
+  const deletedUtilisations = db.exec('SELECT changes() AS c')[0].values[0][0]
+  db.run('DELETE FROM utilisations WHERE date < ?', [cutoffDate])
+
+  // Supprimer les anciennes receptions et leurs items/passages
+  db.run(`DELETE FROM reception_items WHERE reception_id IN (
+    SELECT id FROM receptions WHERE date < ?
+  )`, [cutoffDate])
+  db.run(`DELETE FROM reception_passages WHERE reception_id IN (
+    SELECT id FROM receptions WHERE date < ?
+  )`, [cutoffDate])
+  db.run('DELETE FROM receptions WHERE date < ?', [cutoffDate])
+
+  // Supprimer les anciennes commandes et leurs items
+  db.run(`DELETE FROM commande_items WHERE commande_id IN (
+    SELECT id FROM commandes WHERE date_commande < ?
+  )`, [cutoffDate])
+  db.run('DELETE FROM commandes WHERE date_commande < ?', [cutoffDate])
+
+  console.log(`[DentaStock] Nettoyage: donnees anterieures au ${cutoffDate} supprimees`)
 }
 
 function getDefaultDbPath() {
@@ -803,6 +996,15 @@ async function initDatabase(targetPath) {
 }
 
 function resolveInitialDbPath() {
+  // Priorite 1 : setup config (serveur/client)
+  if (setupConfig && setupConfig.dataPath) {
+    if (setupConfig.mode === 'client') {
+      return getClientDbPath()
+    }
+    return path.join(setupConfig.dataPath, DB_FILENAME)
+  }
+
+  // Priorite 2 : ancien dbpath.txt
   const configuredDbPath = readTextFile(dbConfigFile)
   if (configuredDbPath) return configuredDbPath
 
@@ -885,6 +1087,158 @@ safeHandle('storage:setRoot', async (_, rootPath) => {
   writeTextFile(storageConfigFile, storageRoot)
 
   return getStorageStatus({ databaseState })
+})
+
+// Setup serveur/client
+safeHandle('setup:getConfig', () => {
+  return setupConfig || null
+})
+
+safeHandle('setup:configure', async (_, config) => {
+  const { mode, dataPath } = config
+
+  if (mode === 'server') {
+    // Mode serveur : base dans le dossier d'installation
+    const localDataPath = path.join(getInstallDir(), 'data')
+    ensureDirectory(localDataPath)
+    saveSetupConfig({ mode: 'server', dataPath: localDataPath })
+    await initDatabase(path.join(localDataPath, DB_FILENAME))
+    return { success: true, mode: 'server', dataPath: localDataPath }
+  }
+
+  if (mode === 'client') {
+    // Mode client : base sur le chemin reseau fourni
+    if (!dataPath) throw new Error('Veuillez indiquer le chemin reseau vers le dossier data du serveur.')
+
+    const resolvedPath = path.resolve(dataPath)
+    const dbFile = path.join(resolvedPath, DB_FILENAME)
+
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`Le dossier "${resolvedPath}" est introuvable. Verifiez que le PC serveur est allume et le dossier partage accessible.`)
+    }
+
+    if (!fs.existsSync(dbFile)) {
+      throw new Error(`Aucune base de donnees trouvee dans "${resolvedPath}". Verifiez que DentaStock est installe en mode serveur sur l autre PC.`)
+    }
+
+    saveSetupConfig({ mode: 'client', dataPath: resolvedPath })
+    await initDatabase(dbFile)
+
+    // Premiere replica + demarrer la synchro periodique
+    replicateFromServer()
+    startReplicaSync()
+
+    return { success: true, mode: 'client', dataPath: resolvedPath }
+  }
+
+  throw new Error('Mode invalide. Choisissez "server" ou "client".')
+})
+
+safeHandle('setup:browseFolder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Selectionner le dossier data du serveur',
+    properties: ['openDirectory'],
+  })
+  if (result.canceled || !result.filePaths.length) return null
+  return result.filePaths[0]
+})
+
+safeHandle('setup:reset', async () => {
+  if (replicaInterval) { clearInterval(replicaInterval); replicaInterval = null }
+  const configPath = getSetupConfigPath()
+  if (fs.existsSync(configPath)) fs.unlinkSync(configPath)
+  setupConfig = null
+  return true
+})
+
+// Backup & Replica status
+safeHandle('backup:status', () => {
+  const backupDir = getBackupDir()
+  const lastBackup = getLastMonthlyBackupDate()
+  let backups = []
+
+  if (fs.existsSync(backupDir)) {
+    backups = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('dentastock-') && f.endsWith('.db.gz'))
+      .map(f => {
+        const stats = fs.statSync(path.join(backupDir, f))
+        return { name: f, size: stats.size, date: stats.mtime.toISOString() }
+      })
+      .sort((a, b) => b.date.localeCompare(a.date))
+  }
+
+  const replicaDir = getReplicaDir()
+  let replicaInfo = null
+  const syncFile = path.join(replicaDir, 'last-sync.txt')
+  if (fs.existsSync(syncFile)) {
+    replicaInfo = {
+      lastSync: fs.readFileSync(syncFile, 'utf-8').trim(),
+      exists: fs.existsSync(getReplicaDbPath()),
+      size: fs.existsSync(getReplicaDbPath()) ? fs.statSync(getReplicaDbPath()).size : 0,
+    }
+  }
+
+  return {
+    lastMonthlyBackup: lastBackup ? lastBackup.toISOString() : null,
+    backups,
+    backupDir,
+    replica: replicaInfo,
+    serverReachable: setupConfig?.mode === 'client' ? isServerReachable() : null,
+  }
+})
+
+safeHandle('backup:runNow', async () => {
+  if (!db) throw new Error('Aucune base ouverte.')
+  runMonthlyBackupIfNeeded()
+  // Forcer meme si pas encore 30 jours
+  const backupDir = ensureDirectory(getBackupDir())
+  const timestamp = new Date().toISOString().slice(0, 10)
+  const backupName = `dentastock-manual-${timestamp}.db.gz`
+  const backupPath = path.join(backupDir, backupName)
+
+  saveDatabase()
+  const dbBuffer = fs.readFileSync(dbPath)
+  const compressed = zlib.gzipSync(dbBuffer, { level: 9 })
+  fs.writeFileSync(backupPath, compressed)
+  return backupPath
+})
+
+safeHandle('backup:restore', async (_, backupName) => {
+  const backupDir = getBackupDir()
+  const backupPath = path.join(backupDir, backupName)
+
+  if (!fs.existsSync(backupPath)) throw new Error('Fichier de sauvegarde introuvable.')
+
+  // Decompresser
+  const compressed = fs.readFileSync(backupPath)
+  const decompressed = zlib.gunzipSync(compressed)
+
+  // Valider la DB
+  try {
+    const testDb = new SQL.Database(decompressed)
+    const tables = testDb.exec("SELECT name FROM sqlite_master WHERE type='table'")
+    testDb.close()
+    if (!tables.length) throw new Error('Aucune table trouvee.')
+  } catch (err) {
+    throw new Error(`Sauvegarde invalide: ${err.message}`)
+  }
+
+  // Backup de l'actuelle avant restauration
+  const safeCopy = `${dbPath}.before-restore.bak`
+  if (fs.existsSync(dbPath)) fs.copyFileSync(dbPath, safeCopy)
+
+  // Restaurer
+  fs.writeFileSync(dbPath, decompressed)
+  loadDatabaseFromFile(dbPath)
+  ensureSchema()
+  saveDatabase()
+
+  return { restored: backupName, backup: safeCopy }
+})
+
+safeHandle('replica:syncNow', async () => {
+  const success = replicateFromServer()
+  return { success, serverReachable: isServerReachable() }
 })
 
 // Fournisseurs
@@ -1873,12 +2227,51 @@ app.whenReady().then(async () => {
   dbConfigFile = path.join(userDataPath, 'dbpath.txt')
   storageConfigFile = path.join(userDataPath, 'storage-root.txt')
 
-  try {
-    await initDatabase(resolveInitialDbPath())
-  } catch (error) {
-    dialog.showErrorBox('Erreur base de donnees', `Impossible d'ouvrir la base de donnees : ${error.message}`)
-    app.quit()
-    return
+  // Charger la config setup
+  setupConfig = loadSetupConfig()
+
+  // Si deja configure, initialiser la base
+  if (setupConfig) {
+    try {
+      if (setupConfig.mode === 'client') {
+        // Mode client : essayer le serveur, sinon fallback replica
+        const targetDb = getClientDbPath()
+        await initDatabase(targetDb)
+        startReplicaSync()
+      } else {
+        await initDatabase(resolveInitialDbPath())
+      }
+    } catch (error) {
+      dialog.showErrorBox('Erreur base de donnees', `Impossible d'ouvrir la base de donnees : ${error.message}`)
+      app.quit()
+      return
+    }
+
+    // Sauvegarde mensuelle automatique (serveur uniquement)
+    if (setupConfig.mode === 'server') {
+      try { runMonthlyBackupIfNeeded() } catch (err) {
+        console.error('[DentaStock] Erreur backup mensuel:', err.message)
+      }
+    }
+  } else {
+    // Pas encore configure : on verifie si une base existe deja (migration ancienne install)
+    const defaultDb = getDefaultDbPath()
+    if (fs.existsSync(defaultDb) && fs.statSync(defaultDb).size > 0) {
+      // Ancienne install, migrer vers mode serveur automatiquement
+      const localDataPath = path.join(getInstallDir(), 'data')
+      saveSetupConfig({ mode: 'server', dataPath: localDataPath })
+      try {
+        await initDatabase(defaultDb)
+        try { runMonthlyBackupIfNeeded() } catch (err) {
+          console.error('[DentaStock] Erreur backup mensuel:', err.message)
+        }
+      } catch (error) {
+        dialog.showErrorBox('Erreur base de donnees', `Impossible d'ouvrir la base de donnees : ${error.message}`)
+        app.quit()
+        return
+      }
+    }
+    // Sinon, l'ecran de setup sera affiche par le frontend
   }
 
   createWindow()
@@ -1895,6 +2288,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  if (replicaInterval) { clearInterval(replicaInterval); replicaInterval = null }
   if (db) {
     try {
       saveDatabase()
