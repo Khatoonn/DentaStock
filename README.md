@@ -1,20 +1,30 @@
 # DentaStock
 
-Application de gestion de stock pour cabinet dentaire. Installable en local sur Windows, avec possibilite future de fonctionnement en reseau local (serveur/client).
+Application de gestion de stock pour cabinet dentaire, multi-postes en reseau local (serveur/client).
 
-**[Telecharger l'installateur Windows (v1.0.0)](https://github.com/Khatoonn/DentaStock/releases/latest)**
+**[Telecharger l'installateur Windows (v2.0.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.0.0)**
 
 ## Fonctionnalites
 
-- **Tableau de bord** - Vue d'ensemble : alertes stock, commandes en cours, receptions recentes, KPI mensuels
-- **Commandes & Receptions** - Cycle complet : creation de commande, reception partielle ou totale, suivi multi-passages, archivage automatique des BL/factures
-- **Gestion de stock** - Consultation et correction manuelle du stock, fiche produit detaillee avec historique d'achat
-- **Consommation** - Saisie des produits utilises par soin, avec recherche produit par autocompletion et templates par type de soin
-- **Catalogue produits** - CRUD complet avec categories, references, seuils d'alerte, prix unitaires, fournisseur associe
-- **Fournisseurs** - Gestion des fournisseurs avec coordonnees et contact commercial
-- **Praticiens** - Gestion des praticiens (ajout, modification, suppression)
-- **Documents / GED** - Archivage structure des BL et factures (par type/annee/mois), preview integre, export
-- **Parametres** - Configuration du stockage (local ou dossier reseau partage)
+- **Tableau de bord** — Vue d'ensemble : alertes stock, commandes en cours, receptions recentes, KPI mensuels
+- **Commandes & Receptions** — Cycle complet : creation de commande, reception partielle ou totale, suivi multi-passages, archivage automatique des BL/factures
+- **Produits & Stock** — Page unifiee : catalogue produits, gestion du stock, fiche detail avec historique d'achat, archivage/suppression
+- **Consommation** — Saisie des produits utilises par soin, avec recherche par autocompletion et templates par type de soin
+- **Fournisseurs** — Gestion avec coordonnees et contact, liste compacte avec detail au clic, archivage/restauration
+- **Praticiens** — Gestion des praticiens avec archivage/restauration
+- **Documents / GED** — Archivage structure des BL et factures (par type/annee/mois), preview integre, export
+- **Parametres** — Configuration serveur/client, sauvegardes automatiques, replication
+
+### Architecture serveur/client
+
+- **Mode Serveur** — Le poste principal stocke la base de donnees localement (`C:\DentaStock\data\`). Le dossier est partage sur le reseau Windows pour les autres postes.
+- **Mode Client** — Les postes secondaires se connectent au dossier partage du serveur. Une replique locale est synchronisee toutes les 5 minutes. Si le serveur est inaccessible, le client bascule automatiquement sur sa replique.
+
+### Sauvegardes automatiques
+
+- Sauvegarde mensuelle compressée (.db.gz)
+- Nettoyage automatique des donnees de plus d'un an (utilisations, receptions, commandes)
+- Historique des sauvegardes consultable et restaurable depuis les Parametres
 
 ## Stack technique
 
@@ -44,7 +54,7 @@ Cela lance Vite (port 5173) et Electron simultanement.
 npm run pack
 ```
 
-Genere `dist/DentaStock Setup 1.0.0.exe` - installateur NSIS avec :
+Genere `dist/DentaStock Setup 1.0.0.exe` — installateur NSIS avec :
 - Demande d'elevation administrateur (UAC)
 - Installation par defaut sur `C:\DentaStock`
 - Choix du dossier d'installation
@@ -54,23 +64,23 @@ Genere `dist/DentaStock Setup 1.0.0.exe` - installateur NSIS avec :
 
 ```
 electron/
-  main.js        Backend Electron : base de donnees, IPC handlers, archivage documents
+  main.js        Backend Electron : base de donnees, IPC, replication, sauvegardes
   preload.js     Bridge securise entre main et renderer (contextIsolation)
 src/
-  App.jsx        Routeur principal (HashRouter)
+  App.jsx        Routeur principal (HashRouter) + flux setup
   components/
     Header.jsx   Barre de titre avec controles fenetre
     Sidebar.jsx  Navigation laterale
   pages/
     Dashboard.jsx
+    Setup.jsx          Ecran de configuration initiale (serveur/client)
     Reception.jsx      Commandes + receptions fournisseur
-    Stock.jsx          Gestion du stock + fiche produit
     Consommation.jsx   Saisie des utilisations par soin
-    Produits.jsx       Catalogue produits
-    Fournisseurs.jsx
-    Praticiens.jsx
+    Produits.jsx       Produits & Stock unifies + archivage
+    Fournisseurs.jsx   Liste compacte + detail + archivage
+    Praticiens.jsx     Gestion + archivage
     Documents.jsx      GED / archivage
-    Parametres.jsx     Configuration stockage
+    Parametres.jsx     Config, sauvegardes, replication
 build/
   installer.nsh  Script NSIS personnalise (chemin d'install par defaut)
 assets/
@@ -79,7 +89,7 @@ assets/
 
 ## Base de donnees
 
-SQLite stockee localement (par defaut dans `%APPDATA%/dentastock/data/`). Peut etre deplacee sur un dossier reseau partage via les Parametres.
+SQLite stockee localement (serveur : `C:\DentaStock\data\`, client : replique dans `data/replica/`).
 
 Tables principales : `produits`, `fournisseurs`, `praticiens`, `commandes`, `receptions`, `utilisations`, `documents`, `categories`, `config`
 
@@ -87,4 +97,4 @@ Securite concurrence : verrouillage fichier pour les ecritures, detection de mod
 
 ## Licence
 
-Usage prive - Cabinet dentaire.
+Usage prive — Cabinet dentaire.
