@@ -4,29 +4,29 @@ import { useToast } from '../components/Toast'
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
 const DEMO_FOURNISSEURS = [
-  {
-    id: 1,
-    nom: 'Henry Schein',
-    contact_commercial: 'Claire Bernard',
-    email: 'contact@henryschein.fr',
-    telephone: '01 23 45 67 89',
-    adresse: '10 rue des Fournisseurs, 75010 Paris',
-  },
-  {
-    id: 2,
-    nom: 'Gacd',
-    contact_commercial: 'Marc Delorme',
-    email: 'commandes@gacd.fr',
-    telephone: '01 98 76 54 32',
-    adresse: '25 avenue du Depot, 69000 Lyon',
-  },
+  { id: 1, nom: 'Henry Schein', contact_commercial: 'Marie Dupont', email: 'commandes@henryschein.fr', telephone: '01 41 40 84 00', adresse: '5 Boulevard de la Madeleine, 75001 Paris' },
+  { id: 2, nom: 'Gacd', contact_commercial: 'Jean Martin', email: 'contact@gacd.fr', telephone: '01 56 07 07 07', adresse: '12 Rue de la Paix, 69002 Lyon' },
+  { id: 3, nom: 'Mega Dental', contact_commercial: 'Sophie Leroy', email: 'info@megadental.fr', telephone: '04 78 92 33 00', adresse: '8 Av. des Champs, 33000 Bordeaux' },
+  { id: 4, nom: 'Dental Express', contact_commercial: 'Pierre Blanc', email: 'pro@dentalexpress.fr', telephone: '03 88 10 25 00', adresse: '22 Rue Nationale, 67000 Strasbourg' },
+  { id: 5, nom: 'Promodentaire', contact_commercial: 'Claire Moreau', email: 'service@promodentaire.fr', telephone: '05 61 99 44 00', adresse: '15 Allees Jean Jaures, 31000 Toulouse' },
 ]
 
 const DEMO_PRODUITS = [
-  { id: 1, fournisseur_id: 1 },
-  { id: 2, fournisseur_id: 1 },
-  { id: 3, fournisseur_id: 1 },
-  { id: 4, fournisseur_id: 2 },
+  { id: 1, fournisseur_id: 1 }, { id: 2, fournisseur_id: 1 }, { id: 3, fournisseur_id: 1 },
+  { id: 4, fournisseur_id: 1 }, { id: 5, fournisseur_id: 1 }, { id: 29, fournisseur_id: 1 },
+  { id: 30, fournisseur_id: 1 }, { id: 31, fournisseur_id: 1 }, { id: 42, fournisseur_id: 1 },
+  { id: 43, fournisseur_id: 1 }, { id: 6, fournisseur_id: 2 }, { id: 7, fournisseur_id: 2 },
+  { id: 8, fournisseur_id: 2 }, { id: 9, fournisseur_id: 2 }, { id: 10, fournisseur_id: 2 },
+  { id: 11, fournisseur_id: 2 }, { id: 32, fournisseur_id: 2 }, { id: 33, fournisseur_id: 2 },
+  { id: 34, fournisseur_id: 2 }, { id: 12, fournisseur_id: 3 }, { id: 13, fournisseur_id: 3 },
+  { id: 14, fournisseur_id: 3 }, { id: 15, fournisseur_id: 3 }, { id: 16, fournisseur_id: 3 },
+  { id: 35, fournisseur_id: 3 }, { id: 36, fournisseur_id: 3 }, { id: 37, fournisseur_id: 3 },
+  { id: 17, fournisseur_id: 4 }, { id: 18, fournisseur_id: 4 }, { id: 19, fournisseur_id: 4 },
+  { id: 20, fournisseur_id: 4 }, { id: 21, fournisseur_id: 4 }, { id: 38, fournisseur_id: 4 },
+  { id: 39, fournisseur_id: 4 }, { id: 40, fournisseur_id: 4 }, { id: 41, fournisseur_id: 4 },
+  { id: 22, fournisseur_id: 5 }, { id: 23, fournisseur_id: 5 }, { id: 24, fournisseur_id: 5 },
+  { id: 25, fournisseur_id: 5 }, { id: 26, fournisseur_id: 5 }, { id: 27, fournisseur_id: 5 },
+  { id: 28, fournisseur_id: 5 },
 ]
 
 function createEmptyForm() {

@@ -54,7 +54,55 @@ export default function Statistiques() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!isElectron) { setLoading(false); return }
+    if (!isElectron) {
+      setMonthly([
+        { mois: 'Nov 2025', total: 3250.40 },
+        { mois: 'Dec 2025', total: 2180.60 },
+        { mois: 'Jan 2026', total: 2890.30 },
+        { mois: 'Fev 2026', total: 1950.80 },
+        { mois: 'Mar 2026', total: 3420.70 },
+        { mois: 'Avr 2026', total: 1847.50 },
+      ])
+      setTopProduits([
+        { nom: 'Gants nitrile M (100)', total_consomme: 312 },
+        { nom: 'Masques chirurgicaux (50)', total_consomme: 245 },
+        { nom: 'Articaine 4% 1/100 000', total_consomme: 198 },
+        { nom: 'Aiguilles 30G courtes', total_consomme: 187 },
+        { nom: 'Composite A2 seringue 4g', total_consomme: 156 },
+        { nom: 'Compresses steriles (100)', total_consomme: 142 },
+        { nom: 'Acide orthophosphorique 37%', total_consomme: 128 },
+        { nom: 'Alginate prise rapide 500g', total_consomme: 95 },
+        { nom: 'Fil suture resorbable 4/0', total_consomme: 78 },
+        { nom: 'Sachets sterilisation (200)', total_consomme: 65 },
+      ])
+      setParCategorie([
+        { categorie: 'Hygiene', valeur_stock: 8420 },
+        { categorie: 'Anesthesie', valeur_stock: 6350 },
+        { categorie: 'Composite', valeur_stock: 5280 },
+        { categorie: 'Implantologie', valeur_stock: 4950 },
+        { categorie: 'Endodontie', valeur_stock: 3680 },
+        { categorie: 'Empreinte', valeur_stock: 3200 },
+        { categorie: 'Chirurgie', valeur_stock: 2850 },
+        { categorie: 'Prothese', valeur_stock: 2100 },
+        { categorie: 'Orthodontie', valeur_stock: 1890 },
+        { categorie: 'Radiologie', valeur_stock: 1420 },
+      ])
+      setParFournisseur([
+        { nom: 'Henry Schein', total_achats: 8450 },
+        { nom: 'Promodentaire', total_achats: 5620 },
+        { nom: 'Gacd', total_achats: 4980 },
+        { nom: 'Dental Express', total_achats: 3250 },
+        { nom: 'Mega Dental', total_achats: 2840 },
+      ])
+      setAlertesPeremption([
+        { id: 3, nom: 'Mepivacaine 3% sans vaso', date_peremption: '2026-04-18', stock_actuel: 8, categorie: 'Anesthesie' },
+        { id: 19, nom: 'Cones de gutta assorties', date_peremption: '2026-04-25', stock_actuel: 5, categorie: 'Endodontie' },
+        { id: 12, nom: 'Alginate prise rapide 500g', date_peremption: '2026-05-15', stock_actuel: 12, categorie: 'Empreinte' },
+      ])
+      setValeurStock({ nb_produits: 43, valeur_totale: 43456.90, nb_alertes: 5 })
+      setLoading(false)
+      return
+    }
     Promise.all([
       window.api.statsMonthly(),
       window.api.statsTopProduits(),

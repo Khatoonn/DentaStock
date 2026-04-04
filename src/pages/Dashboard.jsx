@@ -5,15 +5,38 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
 const DEMO_STATS = {
-  totalProduits: 2,
-  alertesStock: 0,
-  commandesEnAttente: 0,
-  receptionsMois: 0,
-  montantMois: 0,
-  produitsAlerte: [],
-  dernieresReceptions: [],
-  commandesEnCours: [],
+  totalProduits: 43,
+  alertesStock: 5,
+  commandesEnAttente: 2,
+  receptionsMois: 3,
+  montantMois: 1847.50,
+  produitsAlerte: [
+    { id: 1, nom: 'Articaine 4% 1/100 000', categorie: 'Anesthesie', stock_actuel: 2, unite: 'boite', stock_minimum: 5 },
+    { id: 4, nom: 'Aiguilles 30G courtes (100)', categorie: 'Anesthesie', stock_actuel: 1, unite: 'boite', stock_minimum: 4 },
+    { id: 22, nom: 'Gants nitrile M (100)', categorie: 'Hygiene', stock_actuel: 3, unite: 'boite', stock_minimum: 10 },
+    { id: 23, nom: 'Gants nitrile L (100)', categorie: 'Hygiene', stock_actuel: 0, unite: 'boite', stock_minimum: 8 },
+    { id: 6, nom: 'Composite A2 seringue 4g', categorie: 'Composite', stock_actuel: 2, unite: 'seringue', stock_minimum: 6 },
+  ],
+  dernieresReceptions: [
+    { id: 27, fournisseur_nom: 'Henry Schein', reference_bl: 'BL-20260401-027', date: '2026-04-01', nb_produits: 6, montant_total: 892.30 },
+    { id: 26, fournisseur_nom: 'Gacd', reference_bl: 'BL-20260402-026', date: '2026-04-02', nb_produits: 3, montant_total: 487.20 },
+    { id: 25, fournisseur_nom: 'Promodentaire', reference_bl: 'BL-20260325-025', date: '2026-03-25', nb_produits: 5, montant_total: 312.80 },
+  ],
+  commandesEnCours: [
+    { id: 28, fournisseur_nom: 'Henry Schein', reference_commande: 'CMD-202604-028', statut: 'EN_ATTENTE', montant_total: 1245.00 },
+    { id: 29, fournisseur_nom: 'Dental Express', reference_commande: 'CMD-202604-029', statut: 'EN_ATTENTE', montant_total: 680.50 },
+    { id: 30, fournisseur_nom: 'Gacd', reference_commande: 'CMD-202603-030', statut: 'PARTIELLE', montant_total: 534.80 },
+  ],
 }
+
+const DEMO_MONTHLY = [
+  { mois: 'Nov 2025', total: 3250.40 },
+  { mois: 'Dec 2025', total: 2180.60 },
+  { mois: 'Jan 2026', total: 2890.30 },
+  { mois: 'Fev 2026', total: 1950.80 },
+  { mois: 'Mar 2026', total: 3420.70 },
+  { mois: 'Avr 2026', total: 1847.50 },
+]
 
 const moneyFormatter = new Intl.NumberFormat('fr-FR', {
   minimumFractionDigits: 2,
@@ -54,6 +77,7 @@ export default function Dashboard() {
     } else {
       setTimeout(() => {
         setStats(DEMO_STATS)
+        setMonthly(DEMO_MONTHLY)
         setLoading(false)
       }, 300)
     }

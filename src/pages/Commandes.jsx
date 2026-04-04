@@ -4,30 +4,56 @@ import { useNavigate } from 'react-router-dom'
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
 const DEMO_FOURNISSEURS = [
-  { id: 1, nom: 'Henry Schein' },
-  { id: 2, nom: 'Gacd' },
+  { id: 1, nom: 'Henry Schein' }, { id: 2, nom: 'Gacd' }, { id: 3, nom: 'Mega Dental' },
+  { id: 4, nom: 'Dental Express' }, { id: 5, nom: 'Promodentaire' },
 ]
 
 const DEMO_PRODUITS = [
-  { id: 1, nom: 'Gants nitrile M', reference: 'GANT-001', unite: 'boite', prix_unitaire: 11.5 },
-  { id: 2, nom: 'Carpules d articaine 1/100 000', reference: 'ANES-001', unite: 'boite', prix_unitaire: 29 },
+  { id: 1, nom: 'Articaine 4% 1/100 000', reference: 'ANE-001', unite: 'boite', prix_unitaire: 28.50 },
+  { id: 4, nom: 'Aiguilles 30G courtes (100)', reference: 'ANE-004', unite: 'boite', prix_unitaire: 12.50 },
+  { id: 6, nom: 'Composite A2 seringue 4g', reference: 'COM-001', unite: 'seringue', prix_unitaire: 18.90 },
+  { id: 22, nom: 'Gants nitrile M (100)', reference: 'HYG-001', unite: 'boite', prix_unitaire: 7.90 },
+  { id: 29, nom: 'Pilier implantaire titane', reference: 'IMP-001', unite: 'unite', prix_unitaire: 85.00 },
 ]
 
 const DEMO_COMMANDES = [
   {
-    id: 1,
-    date_commande: '2026-03-25',
-    date_prevue: '2026-03-29',
-    fournisseur_id: 1,
-    fournisseur_nom: 'Henry Schein',
-    reference_commande: 'CMD-2026-001',
-    statut: 'EN_ATTENTE',
-    notes: 'Commande de test',
-    nb_produits: 2,
-    montant_total: 81,
+    id: 28, date_commande: '2026-04-01', date_prevue: '2026-04-08', fournisseur_id: 1,
+    fournisseur_nom: 'Henry Schein', reference_commande: 'CMD-202604-028', statut: 'EN_ATTENTE',
+    notes: 'Reapprovisionnement anesthesie + implanto', nb_produits: 5, montant_total: 1245.00,
     items: [
-      { produit_id: 1, quantite: 2, quantite_recue: 0, quantite_restante: 2, prix_unitaire: 11.5 },
-      { produit_id: 2, quantite: 2, quantite_recue: 0, quantite_restante: 2, prix_unitaire: 29 },
+      { produit_id: 1, quantite: 10, quantite_recue: 0, quantite_restante: 10, prix_unitaire: 28.50 },
+      { produit_id: 4, quantite: 8, quantite_recue: 0, quantite_restante: 8, prix_unitaire: 12.50 },
+      { produit_id: 29, quantite: 5, quantite_recue: 0, quantite_restante: 5, prix_unitaire: 85.00 },
+    ],
+  },
+  {
+    id: 29, date_commande: '2026-04-02', date_prevue: '2026-04-10', fournisseur_id: 4,
+    fournisseur_nom: 'Dental Express', reference_commande: 'CMD-202604-029', statut: 'EN_ATTENTE',
+    nb_produits: 4, montant_total: 680.50,
+    items: [
+      { produit_id: 17, quantite: 12, quantite_recue: 0, quantite_restante: 12, prix_unitaire: 8.00 },
+      { produit_id: 18, quantite: 8, quantite_recue: 0, quantite_restante: 8, prix_unitaire: 32.00 },
+    ],
+  },
+  {
+    id: 30, date_commande: '2026-03-28', date_prevue: '2026-04-04', fournisseur_id: 2,
+    fournisseur_nom: 'Gacd', reference_commande: 'CMD-202603-030', statut: 'PARTIELLE',
+    notes: 'Livraison partielle recue le 02/04', nb_produits: 6, montant_total: 534.80,
+    items: [
+      { produit_id: 6, quantite: 10, quantite_recue: 10, quantite_restante: 0, prix_unitaire: 18.90 },
+      { produit_id: 7, quantite: 10, quantite_recue: 10, quantite_restante: 0, prix_unitaire: 18.90 },
+      { produit_id: 8, quantite: 6, quantite_recue: 0, quantite_restante: 6, prix_unitaire: 18.90 },
+      { produit_id: 9, quantite: 4, quantite_recue: 0, quantite_restante: 4, prix_unitaire: 42.00 },
+    ],
+  },
+  {
+    id: 15, date_commande: '2026-02-10', date_prevue: '2026-02-17', fournisseur_id: 5,
+    fournisseur_nom: 'Promodentaire', reference_commande: 'CMD-202602-015', statut: 'RECEPTIONNEE',
+    nb_produits: 7, montant_total: 892.30,
+    items: [
+      { produit_id: 22, quantite: 20, quantite_recue: 20, quantite_restante: 0, prix_unitaire: 7.90 },
+      { produit_id: 24, quantite: 15, quantite_recue: 15, quantite_restante: 0, prix_unitaire: 5.50 },
     ],
   },
 ]

@@ -89,7 +89,35 @@ export default function Produits() {
   const [seuilInfo, setSeuilInfo] = useState(null)
 
   const load = async () => {
-    if (!isElectron) return
+    if (!isElectron) {
+      setProduits([
+        { id: 1, reference: 'ANE-001', nom: 'Articaine 4% 1/100 000', categorie: 'Anesthesie', unite: 'boite', stock_actuel: 2, stock_minimum: 5, prix_unitaire: 28.50, fournisseur_id: 1, fournisseur_nom: 'Henry Schein', date_peremption: '2026-04-18', taux_tva: 20 },
+        { id: 2, reference: 'ANE-002', nom: 'Lidocaine 2% adrenalinee', categorie: 'Anesthesie', unite: 'boite', stock_actuel: 8, stock_minimum: 3, prix_unitaire: 22.00, fournisseur_id: 1, fournisseur_nom: 'Henry Schein', taux_tva: 20 },
+        { id: 3, reference: 'ANE-003', nom: 'Mepivacaine 3% sans vaso', categorie: 'Anesthesie', unite: 'boite', stock_actuel: 12, stock_minimum: 3, prix_unitaire: 25.00, fournisseur_id: 1, fournisseur_nom: 'Henry Schein', taux_tva: 20 },
+        { id: 4, reference: 'ANE-004', nom: 'Aiguilles 30G courtes (100)', categorie: 'Anesthesie', unite: 'boite', stock_actuel: 1, stock_minimum: 4, prix_unitaire: 12.50, fournisseur_id: 1, fournisseur_nom: 'Henry Schein', taux_tva: 20 },
+        { id: 6, reference: 'COM-001', nom: 'Composite A2 seringue 4g', categorie: 'Composite', unite: 'seringue', stock_actuel: 2, stock_minimum: 6, prix_unitaire: 18.90, fournisseur_id: 2, fournisseur_nom: 'Gacd', taux_tva: 20 },
+        { id: 7, reference: 'COM-002', nom: 'Composite A3 seringue 4g', categorie: 'Composite', unite: 'seringue', stock_actuel: 14, stock_minimum: 6, prix_unitaire: 18.90, fournisseur_id: 2, fournisseur_nom: 'Gacd', taux_tva: 20 },
+        { id: 9, reference: 'COM-004', nom: 'Adhesif mono-composant 5ml', categorie: 'Composite', unite: 'flacon', stock_actuel: 7, stock_minimum: 3, prix_unitaire: 42.00, fournisseur_id: 2, fournisseur_nom: 'Gacd', taux_tva: 20 },
+        { id: 12, reference: 'EMP-001', nom: 'Alginate prise rapide 500g', categorie: 'Empreinte', unite: 'sachet', stock_actuel: 18, stock_minimum: 8, prix_unitaire: 9.80, fournisseur_id: 3, fournisseur_nom: 'Mega Dental', date_peremption: '2026-05-15', taux_tva: 20 },
+        { id: 17, reference: 'END-001', nom: 'Limes K 25mm assorties', categorie: 'Endodontie', unite: 'blister', stock_actuel: 9, stock_minimum: 6, prix_unitaire: 8.00, fournisseur_id: 4, fournisseur_nom: 'Dental Express', taux_tva: 20 },
+        { id: 22, reference: 'HYG-001', nom: 'Gants nitrile M (100)', categorie: 'Hygiene', unite: 'boite', stock_actuel: 3, stock_minimum: 10, prix_unitaire: 7.90, fournisseur_id: 5, fournisseur_nom: 'Promodentaire', taux_tva: 5.5 },
+        { id: 24, reference: 'HYG-003', nom: 'Masques chirurgicaux (50)', categorie: 'Hygiene', unite: 'boite', stock_actuel: 0, stock_minimum: 6, prix_unitaire: 5.50, fournisseur_id: 5, fournisseur_nom: 'Promodentaire', taux_tva: 5.5 },
+        { id: 29, reference: 'IMP-001', nom: 'Pilier implantaire titane', categorie: 'Implantologie', unite: 'unite', stock_actuel: 6, stock_minimum: 2, prix_unitaire: 85.00, fournisseur_id: 1, fournisseur_nom: 'Henry Schein', taux_tva: 20 },
+        { id: 35, reference: 'PRO-001', nom: 'Ciment provisoire 25g', categorie: 'Prothese', unite: 'tube', stock_actuel: 9, stock_minimum: 4, prix_unitaire: 11.00, fournisseur_id: 3, fournisseur_nom: 'Mega Dental', taux_tva: 20 },
+        { id: 39, reference: 'CHI-002', nom: 'Fil suture resorbable 4/0', categorie: 'Chirurgie', unite: 'sachet', stock_actuel: 11, stock_minimum: 5, prix_unitaire: 6.80, fournisseur_id: 4, fournisseur_nom: 'Dental Express', taux_tva: 20 },
+        { id: 42, reference: 'RAD-001', nom: 'Capteurs radio taille 2', categorie: 'Radiologie', unite: 'unite', stock_actuel: 8, stock_minimum: 4, prix_unitaire: 15.00, fournisseur_id: 1, fournisseur_nom: 'Henry Schein', taux_tva: 20 },
+      ])
+      setFournisseurs([
+        { id: 1, nom: 'Henry Schein' }, { id: 2, nom: 'Gacd' }, { id: 3, nom: 'Mega Dental' },
+        { id: 4, nom: 'Dental Express' }, { id: 5, nom: 'Promodentaire' },
+      ])
+      setCategories([
+        { id: 1, nom: 'Anesthesie' }, { id: 2, nom: 'Composite' }, { id: 3, nom: 'Empreinte' },
+        { id: 4, nom: 'Endodontie' }, { id: 5, nom: 'Hygiene' }, { id: 6, nom: 'Implantologie' },
+        { id: 7, nom: 'Orthodontie' }, { id: 8, nom: 'Prothese' }, { id: 9, nom: 'Chirurgie' }, { id: 10, nom: 'Radiologie' },
+      ])
+      return
+    }
     const [nextProduits, nextArchived, nextFournisseurs, nextCategories] = await Promise.all([
       window.api.produitsList(),
       window.api.produitsListArchived(),

@@ -1039,8 +1039,8 @@ export default function Reception() {
                 <div className="py-12 text-center text-slate-500 text-sm">Aucun besoin de commande pour le moment.</div>
               ) : (
                 produitsACommander.map(produit => (
-                  <div key={produit.id} className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_170px_190px] gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
-                    <div className="min-w-0">
+                  <div key={produit.id} className="flex flex-col lg:flex-row lg:items-center gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
+                    <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-white truncate">{produit.nom}</div>
                       <div className="text-xs text-slate-400 mt-1">
                         {produit.reference || 'Sans reference'}
@@ -1048,13 +1048,13 @@ export default function Reception() {
                         {produit.fournisseur_nom ? ` - ${produit.fournisseur_nom}` : ''}
                       </div>
                     </div>
-                    <div className="text-left xl:text-right">
+                    <div className="shrink-0">
                       <div className="text-xs text-slate-500">Stock actuel</div>
                       <div className="text-sm font-semibold text-red-300 whitespace-nowrap tabular-nums">{Number(produit.stock_actuel || 0)} {produit.unite}</div>
                       <div className="text-xs text-slate-500 whitespace-nowrap">Seuil {Number(produit.stock_minimum || 0)}</div>
                     </div>
-                    <div className="flex items-center">
-                      <button onClick={() => openNewCommande(produit)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                    <div className="shrink-0">
+                      <button onClick={() => openNewCommande(produit)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
                         Commander
                       </button>
                     </div>
@@ -1147,8 +1147,8 @@ export default function Reception() {
               <div className="py-12 text-center text-slate-500 text-sm">Aucune commande en attente.</div>
             ) : (
               commandesEnAttente.map(commande => (
-                <div key={commande.id} className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_170px_170px_180px] gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
-                  <div className="min-w-0">
+                <div key={commande.id} className="flex flex-col lg:flex-row lg:items-center gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_COLORS[commande.statut] || STATUS_COLORS.EN_ATTENTE}`}>{STATUS_LABELS[commande.statut] || commande.statut}</span>
                       {commande.reference_commande && <span className="text-sm font-medium text-white truncate" title={commande.reference_commande}>{commande.reference_commande}</span>}
@@ -1160,22 +1160,18 @@ export default function Reception() {
                       <span>{commande.nb_produits || 0} produit{commande.nb_produits > 1 ? 's' : ''}</span>
                     </div>
                   </div>
-                  <div className="flex items-center 2xl:justify-end">
-                    <div className="text-left 2xl:text-right">
-                      <div className="text-xs text-slate-500">Montant estime</div>
-                      <div className="text-sm font-semibold text-white whitespace-nowrap tabular-nums">{formatMoney(commande.montant_total)}</div>
-                      {commande.statut === 'PARTIELLE' && Number(commande.nb_passages || 0) > 0 && (
-                        <div className="text-xs text-sky-300 mt-1 whitespace-nowrap">
-                          reception en {commande.nb_passages} fois
-                        </div>
-                      )}
-                    </div>
+                  <div className="shrink-0">
+                    <div className="text-xs text-slate-500">Montant estime</div>
+                    <div className="text-sm font-semibold text-white whitespace-nowrap tabular-nums">{formatMoney(commande.montant_total)}</div>
+                    {commande.statut === 'PARTIELLE' && Number(commande.nb_passages || 0) > 0 && (
+                      <div className="text-xs text-sky-300 mt-1 whitespace-nowrap">
+                        reception en {commande.nb_passages} fois
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center">
-                    <button onClick={() => openEditCommande(commande.id)} className="w-full bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">Modifier</button>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => openReceptionFromCommande(commande.id)} className="flex-1 bg-green-600 hover:bg-green-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">Receptionner</button>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button onClick={() => openEditCommande(commande.id)} className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">Modifier</button>
+                    <button onClick={() => openReceptionFromCommande(commande.id)} className="bg-green-600 hover:bg-green-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">Receptionner</button>
                     {commande.statut === 'PARTIELLE' ? (
                       <select
                         defaultValue=""
@@ -1189,14 +1185,14 @@ export default function Reception() {
                           }
                           e.target.value = ''
                         }}
-                        className="w-[170px] bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+                        className="bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white"
                       >
-                        <option value="">Reception partielle</option>
+                        <option value="">Partielle...</option>
                         <option value="CONTINUER">Finir la reception</option>
                         <option value="VOIR" disabled={!commande.active_reception_id}>Voir la reception</option>
                       </select>
                     ) : (
-                      <select value={commande.statut} onChange={e => updateCommandeStatus(commande.id, e.target.value)} className="w-[150px] bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white">
+                      <select value={commande.statut} onChange={e => updateCommandeStatus(commande.id, e.target.value)} className="bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-sm text-white">
                         {STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     )}
@@ -1222,7 +1218,7 @@ export default function Reception() {
               <div className="py-12 text-center text-slate-500 text-sm">Aucune reception enregistree.</div>
             ) : (
               receptionsRecentes.map(reception => (
-                <div key={reception.id} className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_180px_250px] gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
+                <div key={reception.id} className="flex flex-col lg:flex-row lg:items-center gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-white">{reception.fournisseur_nom}</div>
                     <div className="text-xs text-slate-400 mt-1">{reception.reference_bl ? `${reception.reference_bl} - ` : ''}{new Date(reception.date).toLocaleDateString('fr-FR')}</div>
@@ -1231,7 +1227,7 @@ export default function Reception() {
                       {Number(reception.nb_passages || 0) > 1 ? ` - faite en ${reception.nb_passages} fois` : ''}
                     </div>
                   </div>
-                  <div className="flex items-center 2xl:justify-end">
+                  <div className="shrink-0">
                     <div className="text-left 2xl:text-right">
                       <div className="text-xs text-slate-500">Montant</div>
                       <div className="text-sm font-semibold text-white whitespace-nowrap tabular-nums">{formatMoney(reception.montant_total)}</div>
@@ -1270,7 +1266,7 @@ export default function Reception() {
               <div className="py-12 text-center text-slate-500 text-sm">Aucune reception archivee.</div>
             ) : (
               receptionsArchivees.map(reception => (
-                <div key={reception.id} className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_180px_250px] gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
+                <div key={reception.id} className="flex flex-col lg:flex-row lg:items-center gap-4 px-5 py-4 hover:bg-slate-700/30 transition-colors">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-white">{reception.fournisseur_nom}</div>
                     <div className="text-xs text-slate-400 mt-1">{reception.reference_bl ? `${reception.reference_bl} - ` : ''}{new Date(reception.date).toLocaleDateString('fr-FR')}</div>
@@ -1279,7 +1275,7 @@ export default function Reception() {
                       {Number(reception.nb_passages || 0) > 1 ? ` - faite en ${reception.nb_passages} fois` : ''}
                     </div>
                   </div>
-                  <div className="flex items-center 2xl:justify-end">
+                  <div className="shrink-0">
                     <div className="text-left 2xl:text-right">
                       <div className="text-xs text-slate-500">Montant</div>
                       <div className="text-sm font-semibold text-white whitespace-nowrap tabular-nums">{formatMoney(reception.montant_total)}</div>
