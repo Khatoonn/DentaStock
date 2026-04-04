@@ -2,7 +2,7 @@
 
 Application de gestion de stock pour cabinet dentaire, multi-postes en reseau local (serveur/client).
 
-**[Telecharger l'installateur Windows (v2.0.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.0.0)**
+**[Telecharger l'installateur Windows (v2.0.1)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.0.1)**
 
 ## Fonctionnalites
 
@@ -14,6 +14,7 @@ Application de gestion de stock pour cabinet dentaire, multi-postes en reseau lo
 - **Praticiens** — Gestion des praticiens avec archivage/restauration
 - **Documents / GED** — Archivage structure des BL et factures (par type/annee/mois), preview integre, export
 - **Parametres** — Configuration serveur/client, sauvegardes automatiques, replication
+- **Theme clair / sombre** — Basculer entre mode clair et mode sombre via le bouton dans le header
 
 ### Architecture serveur/client
 

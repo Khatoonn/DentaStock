@@ -128,7 +128,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-slate-700">
-        <div className="text-xs text-slate-500 text-center">v1.0.0 - Reseau local</div>
+        <div className="text-xs text-slate-500 text-center">v2.0.1 - Reseau local</div>
       </div>
     </aside>
   )

@@ -8,16 +8,33 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
-  background: #0f172a;
-  color: #f1f5f9;
   height: 100vh;
   overflow: hidden;
+  transition: background-color 0.2s, color 0.2s;
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #1e293b; }
-::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #64748b; }
+/* Dark mode defaults */
+.dark body {
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+/* Light mode defaults */
+html:not(.dark) body {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+/* ===== Scrollbar ===== */
+.dark ::-webkit-scrollbar { width: 6px; height: 6px; }
+.dark ::-webkit-scrollbar-track { background: #1e293b; }
+.dark ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+html:not(.dark) ::-webkit-scrollbar { width: 6px; height: 6px; }
+html:not(.dark) ::-webkit-scrollbar-track { background: #f1f5f9; }
+html:not(.dark) ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+html:not(.dark) ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 input, select, textarea {
   font-family: inherit;
@@ -29,3 +46,95 @@ input, select, textarea {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* ============================================================
+   LIGHT MODE OVERRIDES
+   When html does NOT have .dark class, remap slate neutrals
+   ============================================================ */
+
+/* --- Backgrounds --- */
+html:not(.dark) .bg-slate-950    { background-color: #f1f5f9; }
+html:not(.dark) .bg-slate-900    { background-color: #f1f5f9; }
+html:not(.dark) .bg-slate-800    { background-color: #ffffff; }
+html:not(.dark) .bg-slate-700    { background-color: #f1f5f9; }
+
+/* Opacity variants */
+html:not(.dark) .bg-slate-950\/80  { background-color: rgb(241 245 249 / 0.8); }
+html:not(.dark) .bg-slate-900\/70  { background-color: rgb(248 250 252 / 0.7); }
+html:not(.dark) .bg-slate-900\/60  { background-color: rgb(248 250 252 / 0.6); }
+html:not(.dark) .bg-slate-900\/50  { background-color: rgb(248 250 252 / 0.5); }
+html:not(.dark) .bg-slate-900\/40  { background-color: rgb(248 250 252 / 0.4); }
+html:not(.dark) .bg-slate-700\/50  { background-color: rgb(241 245 249 / 0.5); }
+html:not(.dark) .bg-slate-700\/30  { background-color: rgb(241 245 249 / 0.3); }
+html:not(.dark) .bg-slate-700\/40  { background-color: rgb(241 245 249 / 0.4); }
+
+/* Hover backgrounds */
+html:not(.dark) .hover\:bg-slate-700:hover    { background-color: #e2e8f0; }
+html:not(.dark) .hover\:bg-slate-700\/50:hover { background-color: rgb(226 232 240 / 0.5); }
+html:not(.dark) .hover\:bg-slate-700\/30:hover { background-color: rgb(226 232 240 / 0.3); }
+html:not(.dark) .hover\:bg-slate-700\/40:hover { background-color: rgb(226 232 240 / 0.4); }
+html:not(.dark) .hover\:bg-slate-600:hover    { background-color: #e2e8f0; }
+
+/* --- Borders --- */
+html:not(.dark) .border-slate-700      { border-color: #e2e8f0; }
+html:not(.dark) .border-slate-700\/60  { border-color: rgb(226 232 240 / 0.6); }
+html:not(.dark) .border-slate-700\/30  { border-color: rgb(226 232 240 / 0.3); }
+html:not(.dark) .border-slate-600      { border-color: #cbd5e1; }
+
+/* Hover borders */
+html:not(.dark) .hover\:border-slate-500:hover  { border-color: #94a3b8; }
+html:not(.dark) .hover\:border-sky-500:hover    { border-color: #0ea5e9; }
+html:not(.dark) .hover\:border-emerald-500:hover { border-color: #10b981; }
+
+/* Focus borders */
+html:not(.dark) .focus\:border-slate-500:focus { border-color: #94a3b8; }
+
+/* --- Dividers --- */
+html:not(.dark) .divide-slate-700\/50 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(226 232 240 / 0.5); }
+html:not(.dark) .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(226 232 240 / 0.6); }
+html:not(.dark) .divide-slate-700 > :not([hidden]) ~ :not([hidden])     { border-color: #e2e8f0; }
+
+/* --- Text colors --- */
+html:not(.dark) .text-white     { color: #0f172a; }
+html:not(.dark) .text-slate-100 { color: #334155; }
+html:not(.dark) .text-slate-200 { color: #475569; }
+html:not(.dark) .text-slate-300 { color: #475569; }
+html:not(.dark) .text-slate-400 { color: #64748b; }
+html:not(.dark) .text-slate-500 { color: #94a3b8; }
+
+/* Hover text */
+html:not(.dark) .hover\:text-white:hover     { color: #0f172a; }
+html:not(.dark) .hover\:text-slate-200:hover { color: #334155; }
+
+/* Keep text-white on colored backgrounds (buttons, badges, icons) */
+html:not(.dark) [class*="bg-sky-5"].text-white,
+html:not(.dark) [class*="bg-sky-6"].text-white,
+html:not(.dark) [class*="bg-emerald-5"].text-white,
+html:not(.dark) [class*="bg-emerald-6"].text-white,
+html:not(.dark) [class*="bg-rose-5"].text-white,
+html:not(.dark) [class*="bg-rose-6"].text-white,
+html:not(.dark) [class*="bg-teal-5"].text-white,
+html:not(.dark) [class*="bg-teal-6"].text-white,
+html:not(.dark) [class*="bg-violet-5"].text-white,
+html:not(.dark) [class*="bg-violet-6"].text-white,
+html:not(.dark) [class*="bg-amber-5"].text-white,
+html:not(.dark) [class*="bg-amber-6"].text-white,
+html:not(.dark) [class*="bg-cyan-5"].text-white,
+html:not(.dark) [class*="bg-cyan-6"].text-white,
+html:not(.dark) [class*="bg-red-5"].text-white,
+html:not(.dark) [class*="bg-red-6"].text-white,
+html:not(.dark) [class*="bg-green-5"].text-white,
+html:not(.dark) [class*="bg-green-6"].text-white {
+  color: #ffffff;
+}
+
+/* Placeholder */
+html:not(.dark) .placeholder-slate-500::placeholder { color: #94a3b8; }
+
+/* --- Light mode shadows for cards --- */
+html:not(.dark) .bg-slate-800 {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+}
+
+/* --- Dashed borders --- */
+html:not(.dark) .border-dashed.border-slate-700 { border-color: #cbd5e1; }
