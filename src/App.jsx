@@ -10,7 +10,9 @@ import Fournisseurs from './pages/Fournisseurs'
 import Produits from './pages/Produits'
 import Praticiens from './pages/Praticiens'
 import Parametres from './pages/Parametres'
+import Statistiques from './pages/Statistiques'
 import Setup from './pages/Setup'
+import KeyboardShortcuts from './components/KeyboardShortcuts'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -43,6 +45,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-900 overflow-hidden">
+      <KeyboardShortcuts />
       <Sidebar />
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
         <Header />
@@ -58,6 +61,7 @@ export default function App() {
             <Route path="/produits" element={<Produits />} />
             <Route path="/fournisseurs" element={<Fournisseurs />} />
             <Route path="/praticiens" element={<Praticiens />} />
+            <Route path="/statistiques" element={<Statistiques />} />
             <Route path="/parametres" element={<Parametres />} />
           </Routes>
         </main>

@@ -86,6 +86,36 @@ contextBridge.exposeInMainWorld('api', {
 
   // Stats
   statsDashboard: () => ipcRenderer.invoke('stats:dashboard'),
+  statsMonthly: () => ipcRenderer.invoke('stats:monthly'),
+  statsTopProduits: () => ipcRenderer.invoke('stats:topProduits'),
+  statsParCategorie: () => ipcRenderer.invoke('stats:parCategorie'),
+  statsParFournisseur: () => ipcRenderer.invoke('stats:parFournisseur'),
+  statsAlertesPeremption: () => ipcRenderer.invoke('stats:alertesPeremption'),
+  statsValeurStock: () => ipcRenderer.invoke('stats:valeurStock'),
+
+  // Commande automatique
+  commandesAutoGenerate: () => ipcRenderer.invoke('commandes:autoGenerate'),
+
+  // Export CSV
+  exportCsv: type => ipcRenderer.invoke('export:csv', type),
+
+  // Prix historique
+  prixHistorique: produitId => ipcRenderer.invoke('prix:historique', produitId),
+
+  // Recherche globale
+  searchGlobal: query => ipcRenderer.invoke('search:global', query),
+
+  // Seuils intelligents
+  produitsSeuilRecommande: produitId => ipcRenderer.invoke('produits:seuilRecommande', produitId),
+
+  // Remises fournisseurs
+  remisesList: fournisseurId => ipcRenderer.invoke('remises:list', fournisseurId),
+  remisesAdd: data => ipcRenderer.invoke('remises:add', data),
+  remisesUpdate: (id, data) => ipcRenderer.invoke('remises:update', id, data),
+  remisesDelete: id => ipcRenderer.invoke('remises:delete', id),
+
+  // Calcul prix avec remise
+  prixCalculer: params => ipcRenderer.invoke('prix:calculer', params),
 
   // Dialogs
   dialogOpenFile: filters => ipcRenderer.invoke('dialog:openFile', filters),

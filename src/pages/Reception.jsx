@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -269,6 +270,7 @@ export default function Reception() {
   const [searchParams] = useSearchParams()
   const preloadedCommandeId = Number(searchParams.get('commande') || 0)
 
+  const { toast, confirm } = useToast()
   const [stage, setStage] = useState('EN_ATTENTE')
   const [commandePlanningView, setCommandePlanningView] = useState('ALERTES')
   const [fournisseurs, setFournisseurs] = useState([])
@@ -289,7 +291,6 @@ export default function Reception() {
   const [previewReception, setPreviewReception] = useState(null)
   const [previewDataUrl, setPreviewDataUrl] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
-  const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
 
   const load = async () => {
@@ -353,10 +354,6 @@ export default function Reception() {
     }
   }, [previewReception])
 
-  const clearSuccessLater = message => {
-    setSuccess(message)
-    setTimeout(() => setSuccess(''), 3000)
-  }
 
   const clearRoutingCommande = () => {
     if (preloadedCommandeId) {
@@ -548,7 +545,7 @@ export default function Reception() {
 
       closeCommandeForm()
       await load()
-      clearSuccessLater(editingCommandeId ? 'Commande mise a jour.' : 'Commande enregistree.')
+      toast(editingCommandeId ? 'Commande mise a jour.' : 'Commande enregistree.', 'success')
       setStage('EN_ATTENTE')
     } catch (nextError) {
       setError(nextError.message || 'Impossible d enregistrer la commande.')
@@ -608,12 +605,13 @@ export default function Reception() {
 
       closeReceptionForm()
       await load()
-      clearSuccessLater(
+      toast(
         editingReceptionId
           ? 'Reception mise a jour.'
           : receptionForm.append_to_reception_id
             ? 'Reception partielle ajoutee a la reception existante.'
-            : 'Reception enregistree et stock mis a jour.'
+            : 'Reception enregistree et stock mis a jour.',
+        'success'
       )
       setStage('RECEPTIONNEES')
     } catch (nextError) {
@@ -701,7 +699,7 @@ export default function Reception() {
     try {
       const exportedPath = await window.api.documentsExport(reception.document_path)
       if (exportedPath) {
-        clearSuccessLater(`Document exporte : ${exportedPath.split(/[\\/]/).pop()}.`)
+        toast(`Document exporte : ${exportedPath.split(/[\\/]/).pop()}.`, 'success')
       }
     } catch (nextError) {
       setError(nextError.message || 'Impossible d exporter le document de reception.')
@@ -710,24 +708,6 @@ export default function Reception() {
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {success && (
-        <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-5 py-3 text-emerald-300 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          {success}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-3 text-red-300 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          {error}
-        </div>
-      )}
-
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <select
           value={stage}
@@ -749,6 +729,14 @@ export default function Reception() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           Nouvelle commande
+        </button>
+        <button onClick={async () => {
+          try { const r = await window.api.exportCsv('commandes'); if (r?.success) toast('Export CSV enregistre.', 'success'); else toast('Export annule.', 'info') }
+          catch (e) { toast(e.message, 'error') }
+        }}
+          className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shrink-0">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
         </button>
       </div>
 

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -121,9 +122,9 @@ export default function Consommation() {
   const [produits, setProduits] = useState([])
   const [utilisations, setUtilisations] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
+  const { toast } = useToast()
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [success, setSuccess] = useState(false)
   const [detail, setDetail] = useState(null)
 
   const load = async () => {
@@ -183,11 +184,10 @@ export default function Consommation() {
     setSaving(true)
     if (isElectron) await window.api.utilisationsAdd(form)
     setSaving(false)
-    setSuccess(true)
+    toast('Consommation enregistree et stock mis a jour.', 'success')
     setForm(EMPTY_FORM)
     setShowForm(false)
     load()
-    setTimeout(() => setSuccess(false), 3000)
   }
 
   const openDetail = async (id) => {
@@ -200,15 +200,6 @@ export default function Consommation() {
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {success && (
-        <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/30 rounded-xl px-5 py-3 text-violet-300 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          Consommation enregistree et stock decremente.
-        </div>
-      )}
-
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-white">Consommation</h2>
@@ -224,6 +215,14 @@ export default function Consommation() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           Declarer une utilisation
+        </button>
+        <button onClick={async () => {
+          try { const r = await window.api.exportCsv('consommations'); if (r?.success) toast('Export CSV enregistre.', 'success'); else toast('Export annule.', 'info') }
+          catch (e) { toast(e.message, 'error') }
+        }}
+          className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
         </button>
       </div>
 

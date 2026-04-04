@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -41,11 +42,15 @@ function StatCard({ label, value, sub, color, icon }) {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [stats, setStats] = useState(null)
+  const [monthly, setMonthly] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (isElectron) {
-      window.api.statsDashboard().then(setStats).finally(() => setLoading(false))
+      Promise.all([
+        window.api.statsDashboard(),
+        window.api.statsMonthly(),
+      ]).then(([s, m]) => { setStats(s); setMonthly(m) }).finally(() => setLoading(false))
     } else {
       setTimeout(() => {
         setStats(DEMO_STATS)
@@ -115,6 +120,25 @@ export default function Dashboard() {
           icon={<svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
       </div>
+
+      {monthly.length > 0 && (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+          <h3 className="text-sm font-semibold text-white mb-4">Depenses mensuelles (6 derniers mois)</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={monthly}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+              <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 13 }}
+                labelStyle={{ color: '#94a3b8' }}
+                formatter={v => [`${moneyFormatter.format(v)} \u20ac`, 'Achats']}
+              />
+              <Bar dataKey="achats" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden min-w-0">

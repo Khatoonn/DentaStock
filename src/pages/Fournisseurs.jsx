@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -47,7 +48,7 @@ export default function Fournisseurs() {
   const [editingId, setEditingId] = useState(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
-  const [message, setMessage] = useState(null)
+  const { toast, confirm } = useToast()
   const [selectedId, setSelectedId] = useState(null)
   const [tab, setTab] = useState('actifs')
 
@@ -73,11 +74,6 @@ export default function Fournisseurs() {
     load()
   }, [])
 
-  const clearMessageLater = nextMessage => {
-    setMessage(nextMessage)
-    window.clearTimeout(clearMessageLater.timer)
-    clearMessageLater.timer = window.setTimeout(() => setMessage(null), 3200)
-  }
 
   const produitCountByFournisseur = useMemo(() => {
     return produits.reduce((accumulator, produit) => {
@@ -111,6 +107,38 @@ export default function Fournisseurs() {
   }, [currentList, search])
 
   const selectedFournisseur = currentList.find(f => f.id === selectedId) || null
+  const [remises, setRemises] = useState([])
+  const [showRemiseForm, setShowRemiseForm] = useState(false)
+  const [remiseForm, setRemiseForm] = useState({ seuil_quantite: 0, remise_pourcent: 0, description: '' })
+
+  useEffect(() => {
+    if (selectedId && isElectron) {
+      window.api.remisesList(selectedId).then(setRemises).catch(() => setRemises([]))
+    } else {
+      setRemises([])
+    }
+  }, [selectedId])
+
+  const saveRemise = async () => {
+    if (remiseForm.seuil_quantite <= 0 || remiseForm.remise_pourcent <= 0) return
+    try {
+      await window.api.remisesAdd({ fournisseur_id: selectedId, ...remiseForm })
+      const r = await window.api.remisesList(selectedId)
+      setRemises(r)
+      setShowRemiseForm(false)
+      setRemiseForm({ seuil_quantite: 0, remise_pourcent: 0, description: '' })
+      toast('Remise ajoutee.', 'success')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const deleteRemise = async (id) => {
+    try {
+      await window.api.remisesDelete(id)
+      const r = await window.api.remisesList(selectedId)
+      setRemises(r)
+      toast('Remise supprimee.', 'success')
+    } catch (e) { toast(e.message, 'error') }
+  }
 
   const resetForm = () => {
     setForm(createEmptyForm())
@@ -153,31 +181,24 @@ export default function Fournisseurs() {
       }
 
       await load()
-      clearMessageLater({
-        tone: 'success',
-        text: editingId ? 'Fournisseur mis a jour.' : 'Fournisseur ajoute.',
-      })
+      toast(editingId ? 'Fournisseur mis a jour.' : 'Fournisseur ajoute.', 'success')
       resetForm()
     } catch (error) {
-      clearMessageLater({
-        tone: 'error',
-        text: error.message || 'Impossible d enregistrer le fournisseur.',
-      })
+      toast(error.message || 'Impossible d enregistrer le fournisseur.', 'error')
     } finally {
       setSaving(false)
     }
   }
 
   const archiveFournisseur = async (fournisseur) => {
-    const confirmed = window.confirm(`Archiver "${fournisseur.nom}" ?`)
-    if (!confirmed) return
+    if (!(await confirm(`Archiver "${fournisseur.nom}" ?`))) return
     try {
       if (isElectron) await window.api.fournisseursArchive(fournisseur.id)
       if (selectedId === fournisseur.id) setSelectedId(null)
       await load()
-      clearMessageLater({ tone: 'success', text: `"${fournisseur.nom}" archive.` })
+      toast(`"${fournisseur.nom}" archive.`, 'success')
     } catch (error) {
-      clearMessageLater({ tone: 'error', text: error.message })
+      toast(error.message, 'error')
     }
   }
 
@@ -186,44 +207,34 @@ export default function Fournisseurs() {
       if (isElectron) await window.api.fournisseursRestore(fournisseur.id)
       if (selectedId === fournisseur.id) setSelectedId(null)
       await load()
-      clearMessageLater({ tone: 'success', text: `"${fournisseur.nom}" restaure.` })
+      toast(`"${fournisseur.nom}" restaure.`, 'success')
     } catch (error) {
-      clearMessageLater({ tone: 'error', text: error.message })
+      toast(error.message, 'error')
     }
   }
 
   const deleteFournisseur = async (fournisseur) => {
-    const confirmed = window.confirm(`Supprimer definitivement "${fournisseur.nom}" ? Cette action est irreversible.`)
-    if (!confirmed) return
+    if (!(await confirm(`Supprimer definitivement "${fournisseur.nom}" ? Cette action est irreversible.`))) return
     try {
       if (isElectron) await window.api.fournisseursDelete(fournisseur.id)
       if (selectedId === fournisseur.id) setSelectedId(null)
       await load()
-      clearMessageLater({ tone: 'success', text: `"${fournisseur.nom}" supprime definitivement.` })
+      toast(`"${fournisseur.nom}" supprime definitivement.`, 'success')
     } catch (error) {
-      clearMessageLater({ tone: 'error', text: error.message })
+      toast(error.message, 'error')
     }
+  }
+
+  const exportCsv = async () => {
+    try {
+      const result = await window.api.exportCsv('fournisseurs')
+      if (result?.success) toast('Export CSV enregistre.', 'success')
+      else toast('Export annule.', 'info')
+    } catch (e) { toast(e.message, 'error') }
   }
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {message && (
-        <div className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm border ${
-          message.tone === 'error'
-            ? 'bg-red-500/10 border-red-500/30 text-red-300'
-            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-        }`}>
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            {message.tone === 'error' ? (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            )}
-          </svg>
-          {message.text}
-        </div>
-      )}
-
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
         <div className="flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between gap-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 flex-1 min-w-0">
@@ -253,7 +264,7 @@ export default function Fournisseurs() {
             </div>
           </div>
 
-          {tab === 'actifs' && (
+          {tab === 'actifs' && (<>
             <button
               onClick={() => {
                 setForm(createEmptyForm())
@@ -267,7 +278,12 @@ export default function Fournisseurs() {
               </svg>
               Nouveau fournisseur
             </button>
-          )}
+            <button onClick={exportCsv}
+              className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Export CSV
+            </button>
+          </>)}
         </div>
       </div>
 
@@ -452,6 +468,57 @@ export default function Fournisseurs() {
               <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/60">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Adresse</div>
                 <div className="text-slate-200 mt-2 break-words">{selectedFournisseur.adresse || '-'}</div>
+              </div>
+
+              {/* Remises */}
+              <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/60 col-span-2">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-xs uppercase tracking-wide text-slate-500">Remises par quantite</div>
+                  <button onClick={() => setShowRemiseForm(!showRemiseForm)}
+                    className="text-xs text-emerald-300 hover:text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded-lg">
+                    + Ajouter
+                  </button>
+                </div>
+
+                {showRemiseForm && (
+                  <div className="flex items-end gap-2 mb-3 bg-slate-800 rounded-lg p-3 border border-slate-700">
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-slate-400 mb-1">A partir de (unite)</label>
+                      <input type="number" min="1" value={remiseForm.seuil_quantite} onChange={e => setRemiseForm(f => ({ ...f, seuil_quantite: Number(e.target.value) }))}
+                        className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-slate-400 mb-1">Remise (%)</label>
+                      <input type="number" min="0" max="100" step="0.5" value={remiseForm.remise_pourcent} onChange={e => setRemiseForm(f => ({ ...f, remise_pourcent: Number(e.target.value) }))}
+                        className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-slate-400 mb-1">Description</label>
+                      <input type="text" value={remiseForm.description} onChange={e => setRemiseForm(f => ({ ...f, description: e.target.value }))}
+                        className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-white" placeholder="ex: Remise volume" />
+                    </div>
+                    <button onClick={saveRemise} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-lg shrink-0">OK</button>
+                  </div>
+                )}
+
+                {remises.length === 0 ? (
+                  <div className="text-xs text-slate-500">Aucune remise configuree.</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {remises.map(r => (
+                      <div key={r.id} className="flex items-center justify-between text-xs bg-slate-800 rounded-lg px-3 py-2 border border-slate-700">
+                        <div>
+                          <span className="text-white font-medium">-{r.remise_pourcent}%</span>
+                          <span className="text-slate-400 ml-2">des {r.seuil_quantite} unites</span>
+                          {r.description && <span className="text-slate-500 ml-2">({r.description})</span>}
+                        </div>
+                        <button onClick={() => deleteRemise(r.id)} className="text-slate-400 hover:text-red-400 p-1">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

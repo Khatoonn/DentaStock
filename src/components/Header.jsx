@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom'
 import { useTheme } from '../ThemeContext'
+import GlobalSearch from './GlobalSearch'
 
 const titles = {
   '/dashboard': { label: 'Tableau de bord', desc: 'Vue generale du stock et des activites' },
@@ -11,6 +12,7 @@ const titles = {
   '/produits': { label: 'Produits & Stock', desc: 'Gerer le catalogue, le stock et les seuils' },
   '/fournisseurs': { label: 'Fournisseurs', desc: 'Gerer les fournisseurs et leurs contacts' },
   '/praticiens': { label: 'Praticiens', desc: 'Gerer les praticiens du cabinet' },
+  '/statistiques': { label: 'Statistiques', desc: 'Graphiques et indicateurs de performance' },
   '/parametres': { label: 'Parametres', desc: 'Configurer le stockage partage et les archives' },
 }
 
@@ -36,6 +38,7 @@ export default function Header() {
       </div>
 
       <div className="no-drag flex items-center gap-4">
+        <GlobalSearch />
         <span className="text-xs text-slate-400 capitalize">{dateStr}</span>
 
         <button

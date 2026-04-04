@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
+const PAGE_SIZE = 25
 
 const moneyFormatter = new Intl.NumberFormat('fr-FR', {
   minimumFractionDigits: 2,
@@ -21,6 +23,7 @@ function createEmptyProductForm() {
     stock_minimum: 0,
     prix_unitaire: 0,
     fournisseur_id: '',
+    date_peremption: '',
   }
 }
 
@@ -56,10 +59,13 @@ export default function Produits() {
   const [fournisseurs, setFournisseurs] = useState([])
   const [categories, setCategories] = useState([])
 
+  const { toast, confirm } = useToast()
+
   // UI state
   const [tab, setTab] = useState('actifs')
   const [filter, setFilter] = useState({ categorie: '', search: '', alerte: false })
-  const [message, setMessage] = useState(null)
+  const [page, setPage] = useState(1)
+  const [formErrors, setFormErrors] = useState({})
 
   // Product form (add/edit)
   const [productForm, setProductForm] = useState(createEmptyProductForm)
@@ -78,7 +84,9 @@ export default function Produits() {
   const [sheetForm, setSheetForm] = useState(null)
   const [savingSheet, setSavingSheet] = useState(false)
   const [productHistory, setProductHistory] = useState({ commandes: [], receptions: [] })
+  const [prixHistory, setPrixHistory] = useState([])
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [seuilInfo, setSeuilInfo] = useState(null)
 
   const load = async () => {
     if (!isElectron) return
@@ -113,7 +121,12 @@ export default function Produits() {
     })
   }, [filter, produits])
 
-  const displayedProduits = tab === 'archives' ? archivedProduits : filteredProduits
+  // Reset page on filter/tab change
+  useEffect(() => { setPage(1) }, [filter, tab])
+
+  const allDisplayed = tab === 'archives' ? archivedProduits : filteredProduits
+  const totalPages = Math.ceil(allDisplayed.length / PAGE_SIZE)
+  const displayedProduits = allDisplayed.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const stockStatus = p => {
     if (Number(p.stock_actuel || 0) <= 0) return { label: 'Epuise', cls: 'bg-red-500/20 text-red-400' }
@@ -121,14 +134,8 @@ export default function Produits() {
     return { label: 'OK', cls: 'bg-green-500/20 text-green-400' }
   }
 
-  const flash = (tone, text) => {
-    setMessage({ tone, text })
-    clearTimeout(flash.t)
-    flash.t = setTimeout(() => setMessage(null), 3200)
-  }
-
   // --- Product CRUD ---
-  const resetProductForm = () => { setProductForm(createEmptyProductForm()); setEditingProductId(null); setShowProductForm(false) }
+  const resetProductForm = () => { setProductForm(createEmptyProductForm()); setEditingProductId(null); setShowProductForm(false); setFormErrors({}) }
 
   const openProductEditor = p => {
     setProductForm({
@@ -136,56 +143,77 @@ export default function Produits() {
       unite: p.unite || 'unite', stock_actuel: Number(p.stock_actuel || 0),
       stock_minimum: Number(p.stock_minimum || 0), prix_unitaire: Number(p.prix_unitaire || 0),
       fournisseur_id: Number(p.fournisseur_id || '') || '',
+      date_peremption: p.date_peremption || '',
     })
     setEditingProductId(p.id)
     setShowProductForm(true)
+    setFormErrors({})
   }
 
   const saveProduct = async () => {
-    if (!productForm.nom.trim()) return
+    const errors = {}
+    if (!productForm.nom.trim()) errors.nom = 'Le nom est requis.'
+    if (Object.keys(errors).length) { setFormErrors(errors); return }
+    setFormErrors({})
     setSavingProduct(true)
     try {
-      const payload = { ...productForm, categorie: productForm.categorie || null, fournisseur_id: productForm.fournisseur_id || null }
+      const payload = { ...productForm, categorie: productForm.categorie || null, fournisseur_id: productForm.fournisseur_id || null, date_peremption: productForm.date_peremption || null }
       if (editingProductId) {
         await window.api.produitsUpdate(editingProductId, payload)
       } else {
         await window.api.produitsAdd(payload)
       }
       await load()
-      flash('success', editingProductId ? 'Produit mis a jour.' : 'Produit ajoute au catalogue.')
+      toast(editingProductId ? 'Produit mis a jour.' : 'Produit ajoute au catalogue.', 'success')
       resetProductForm()
     } catch (e) {
-      flash('error', e.message || 'Impossible d enregistrer le produit.')
+      toast(e.message || 'Impossible d enregistrer le produit.', 'error')
     } finally {
       setSavingProduct(false)
     }
   }
 
   const archiveProduct = async p => {
-    if (!window.confirm(`Archiver "${p.nom}" ?`)) return
+    if (!(await confirm(`Archiver "${p.nom}" ?`))) return
     try {
       await window.api.produitsArchive(p.id)
       if (selectedId === p.id) closeSheet()
       await load()
-      flash('success', `"${p.nom}" archive.`)
-    } catch (e) { flash('error', e.message) }
+      toast(`"${p.nom}" archive.`, 'success')
+    } catch (e) { toast(e.message, 'error') }
   }
 
   const restoreProduct = async p => {
     try {
       await window.api.produitsRestore(p.id)
       await load()
-      flash('success', `"${p.nom}" restaure.`)
-    } catch (e) { flash('error', e.message) }
+      toast(`"${p.nom}" restaure.`, 'success')
+    } catch (e) { toast(e.message, 'error') }
   }
 
   const deleteProduct = async p => {
-    if (!window.confirm(`Supprimer definitivement "${p.nom}" ? Irreversible.`)) return
+    if (!(await confirm(`Supprimer definitivement "${p.nom}" ? Irreversible.`))) return
     try {
       await window.api.produitsDelete(p.id)
       await load()
-      flash('success', `"${p.nom}" supprime.`)
-    } catch (e) { flash('error', e.message) }
+      toast(`"${p.nom}" supprime.`, 'success')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const exportCsv = async () => {
+    try {
+      const result = await window.api.exportCsv('produits')
+      if (result?.success) toast('Export CSV enregistre.', 'success')
+      else toast('Export annule.', 'info')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const autoCommande = async () => {
+    try {
+      const result = await window.api.commandesAutoGenerate()
+      toast(result?.message || 'Commandes generees.', 'success')
+      await load()
+    } catch (e) { toast(e.message, 'error') }
   }
 
   // --- Category CRUD ---
@@ -212,17 +240,17 @@ export default function Produits() {
         setFilter(f => ({ ...f, categorie: payload.nom }))
       }
       await load()
-      flash('success', editingCategoryId ? 'Categorie mise a jour.' : 'Categorie ajoutee.')
+      toast(editingCategoryId ? 'Categorie mise a jour.' : 'Categorie ajoutee.', 'success')
       resetCategoryForm()
     } catch (e) {
-      flash('error', e.message || 'Impossible d enregistrer la categorie.')
+      toast(e.message || 'Impossible d enregistrer la categorie.', 'error')
     } finally {
       setSavingCategory(false)
     }
   }
 
   const deleteCategory = async cat => {
-    if (!window.confirm(`Supprimer la categorie "${cat.nom}" ?`)) return
+    if (!(await confirm(`Supprimer la categorie "${cat.nom}" ?`))) return
     try {
       if (cat.persisted) {
         await window.api.categoriesDelete(cat.id)
@@ -230,8 +258,8 @@ export default function Produits() {
       }
       if (filter.categorie === cat.nom) setFilter(f => ({ ...f, categorie: '' }))
       if (editingCategoryId === cat.id) resetCategoryForm()
-      flash('success', `Categorie "${cat.nom}" supprimee.`)
-    } catch (e) { flash('error', e.message) }
+      toast(`Categorie "${cat.nom}" supprimee.`, 'success')
+    } catch (e) { toast(e.message, 'error') }
   }
 
   // --- Product detail sheet ---
@@ -242,18 +270,39 @@ export default function Produits() {
       unite: p.unite || 'unite', stock_actuel: Number(p.stock_actuel || 0),
       stock_minimum: Number(p.stock_minimum || 0), prix_unitaire: Number(p.prix_unitaire || 0),
       fournisseur_id: p.fournisseur_id || null,
+      date_peremption: p.date_peremption || '',
     })
     setProductHistory({ commandes: [], receptions: [] })
+    setPrixHistory([])
     requestAnimationFrame(() => sheetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     setLoadingHistory(true)
     try {
-      const h = await window.api.produitsHistory(p.id)
+      const [h, ph] = await Promise.all([
+        window.api.produitsHistory(p.id),
+        window.api.prixHistorique(p.id),
+      ])
       setProductHistory(h || { commandes: [], receptions: [] })
-    } catch { setProductHistory({ commandes: [], receptions: [] }) }
+      setPrixHistory(ph || [])
+    } catch { setProductHistory({ commandes: [], receptions: [] }); setPrixHistory([]) }
     finally { setLoadingHistory(false) }
   }
 
-  const closeSheet = () => { setSelectedId(null); setSheetForm(null) }
+  const closeSheet = () => { setSelectedId(null); setSheetForm(null); setSeuilInfo(null) }
+
+  const analyserSeuil = async () => {
+    if (!selectedId || !isElectron) return
+    try {
+      const info = await window.api.produitsSeuilRecommande(selectedId)
+      setSeuilInfo(info)
+    } catch { setSeuilInfo({ message: 'Erreur lors de l\'analyse.' }) }
+  }
+
+  const appliquerSeuil = () => {
+    if (seuilInfo?.recommandation && sheetForm) {
+      setSheetForm(f => ({ ...f, stock_minimum: seuilInfo.recommandation }))
+      toast(`Seuil mis a ${seuilInfo.recommandation} (a enregistrer).`, 'info')
+    }
+  }
 
   const saveSheet = async () => {
     if (!sheetForm?.nom?.trim()) return
@@ -264,12 +313,14 @@ export default function Produits() {
         categorie: sheetForm.categorie || null, unite: sheetForm.unite || 'unite',
         stock_actuel: Number(sheetForm.stock_actuel || 0), stock_minimum: Number(sheetForm.stock_minimum || 0),
         prix_unitaire: Number(sheetForm.prix_unitaire || 0), fournisseur_id: sheetForm.fournisseur_id || null,
+        date_peremption: sheetForm.date_peremption || null,
       })
       await load()
-      const h = await window.api.produitsHistory(selectedId)
+      const [h, ph] = await Promise.all([window.api.produitsHistory(selectedId), window.api.prixHistorique(selectedId)])
       setProductHistory(h || { commandes: [], receptions: [] })
-      flash('success', 'Fiche produit mise a jour.')
-    } catch (e) { flash('error', e.message) }
+      setPrixHistory(ph || [])
+      toast('Fiche produit mise a jour.', 'success')
+    } catch (e) { toast(e.message, 'error') }
     finally { setSavingSheet(false) }
   }
 
@@ -283,20 +334,6 @@ export default function Produits() {
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {message && (
-        <div className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm border ${
-          message.tone === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-        }`}>
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            {message.tone === 'error'
-              ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            }
-          </svg>
-          {message.text}
-        </div>
-      )}
-
       {/* Toolbar */}
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
         <div className="flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between gap-4">
@@ -323,6 +360,18 @@ export default function Produits() {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <button onClick={autoCommande}
+              className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              Commande auto
+            </button>
+            <button onClick={exportCsv}
+              className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Export CSV
+            </button>
             <button
               onClick={() => { setCategoryForm(createEmptyCategoryForm()); setShowCategoryForm(c => !c || editingCategoryId !== null); setEditingCategoryId(null) }}
               className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -431,8 +480,9 @@ export default function Produits() {
                 </div>
                 <div className="xl:col-span-4">
                   <label className="block text-xs font-medium text-slate-400 mb-1">Nom *</label>
-                  <input type="text" value={productForm.nom} onChange={e => setProductForm(f => ({ ...f, nom: e.target.value }))}
-                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
+                  <input type="text" value={productForm.nom} onChange={e => { setProductForm(f => ({ ...f, nom: e.target.value })); setFormErrors(e => ({ ...e, nom: undefined })) }}
+                    className={`w-full bg-slate-700 border rounded-lg px-3 py-2 text-sm text-white ${formErrors.nom ? 'border-red-500' : 'border-slate-600'}`} />
+                  {formErrors.nom && <p className="text-xs text-red-400 mt-1">{formErrors.nom}</p>}
                 </div>
                 <div className="xl:col-span-2">
                   <label className="block text-xs font-medium text-slate-400 mb-1">Categorie</label>
@@ -462,13 +512,18 @@ export default function Produits() {
                   <input type="number" min="0" step="0.01" value={productForm.prix_unitaire} onChange={e => setProductForm(f => ({ ...f, prix_unitaire: Number(e.target.value) }))}
                     className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
                 </div>
-                <div className="xl:col-span-4">
+                <div className="xl:col-span-3">
                   <label className="block text-xs font-medium text-slate-400 mb-1">Fournisseur</label>
                   <select value={productForm.fournisseur_id} onChange={e => setProductForm(f => ({ ...f, fournisseur_id: Number(e.target.value) || '' }))}
                     className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white">
                     <option value="">- Aucun -</option>
                     {fournisseurs.map(f => <option key={f.id} value={f.id}>{f.nom}</option>)}
                   </select>
+                </div>
+                <div className="xl:col-span-2">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Peremption</label>
+                  <input type="date" value={productForm.date_peremption} onChange={e => setProductForm(f => ({ ...f, date_peremption: e.target.value }))}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
                 </div>
               </div>
 
@@ -515,16 +570,17 @@ export default function Produits() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] table-fixed text-sm">
+                <table className="w-full min-w-[1000px] table-fixed text-sm">
                   <colgroup>
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '24%' }} />
-                    <col style={{ width: '12%' }} />
-                    <col style={{ width: '9%' }} />
                     <col style={{ width: '8%' }} />
+                    <col style={{ width: '20%' }} />
                     <col style={{ width: '10%' }} />
-                    <col style={{ width: '12%' }} />
-                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '17%' }} />
                   </colgroup>
                   <thead>
                     <tr className="text-xs font-medium text-slate-400 border-b border-slate-700">
@@ -535,12 +591,13 @@ export default function Produits() {
                       <th className="text-right py-3 px-3">Seuil</th>
                       <th className="text-right py-3 px-3">Prix HT</th>
                       <th className="text-left py-3 px-3">Fournisseur</th>
+                      <th className="text-center py-3 px-3">Peremption</th>
                       <th className="text-center py-3 px-3">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/50">
                     {displayedProduits.length === 0 ? (
-                      <tr><td colSpan={8} className="text-center py-10 text-slate-500">
+                      <tr><td colSpan={9} className="text-center py-10 text-slate-500">
                         {tab === 'archives' ? 'Aucun produit archive.' : 'Aucun produit trouve.'}
                       </td></tr>
                     ) : displayedProduits.map(p => {
@@ -568,6 +625,14 @@ export default function Produits() {
                           <td className="py-2.5 px-3 text-right text-slate-300 tabular-nums">{Number(p.stock_minimum || 0)}</td>
                           <td className="py-2.5 px-3 text-right text-slate-300 tabular-nums">{Number(p.prix_unitaire || 0) > 0 ? formatMoney(p.prix_unitaire) : '-'}</td>
                           <td className="py-2.5 px-3 text-slate-400 text-xs truncate">{p.fournisseur_nom || '-'}</td>
+                          <td className="py-2.5 px-3 text-center text-xs">
+                            {p.date_peremption ? (() => {
+                              const d = new Date(p.date_peremption)
+                              const diff = Math.ceil((d - new Date()) / 86400000)
+                              const cls = diff <= 0 ? 'text-red-400 font-semibold' : diff <= 30 ? 'text-red-400' : diff <= 90 ? 'text-amber-400' : 'text-slate-400'
+                              return <span className={cls}>{d.toLocaleDateString('fr-FR')}</span>
+                            })() : <span className="text-slate-600">-</span>}
+                          </td>
                           <td className="py-2.5 px-3 text-center" onClick={e => e.stopPropagation()}>
                             {tab === 'actifs' ? (
                               <div className="flex items-center justify-center gap-1">
@@ -591,6 +656,17 @@ export default function Produits() {
                   </tbody>
                 </table>
               </div>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-5 py-3 border-t border-slate-700">
+                  <span className="text-xs text-slate-400">{allDisplayed.length} produit{allDisplayed.length > 1 ? 's' : ''} - Page {page}/{totalPages}</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                      className="px-3 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors">Precedent</button>
+                    <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                      className="px-3 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors">Suivant</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Product detail sheet (side panel) */}
@@ -649,6 +725,11 @@ export default function Produits() {
                     <input type="number" min="0" step="0.01" value={sheetForm.prix_unitaire} onChange={e => setSheetForm(f => ({ ...f, prix_unitaire: Number(e.target.value) }))}
                       className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white text-right" />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Peremption</label>
+                    <input type="date" value={sheetForm.date_peremption} onChange={e => setSheetForm(f => ({ ...f, date_peremption: e.target.value }))}
+                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
+                  </div>
                 </div>
 
                 {/* History */}
@@ -702,12 +783,84 @@ export default function Produits() {
                       ))}
                     </div>
                   </div>
+
+                  {prixHistory.length > 0 && (
+                    <div className="bg-slate-900/60 border border-slate-700 rounded-xl overflow-hidden">
+                      <div className="px-3 py-2 border-b border-slate-700 flex items-center justify-between">
+                        <span className="text-xs font-medium text-white">Historique des prix</span>
+                        <span className="text-xs text-slate-400">{prixHistory.length}</span>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto divide-y divide-slate-700/50">
+                        {prixHistory.map((ph, i) => (
+                          <div key={i} className="px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-white truncate">{ph.fournisseur_nom || '-'}</span>
+                              <span className="text-xs text-violet-300 tabular-nums">{formatMoney(ph.prix_unitaire)}</span>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              {new Date(ph.date).toLocaleDateString('fr-FR')} - {ph.source}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Analyse seuil intelligent */}
+                <div className="border-t border-slate-700 pt-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h4 className="text-xs font-semibold text-white">Seuil intelligent</h4>
+                    <button onClick={analyserSeuil}
+                      className="text-xs text-indigo-300 hover:text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 px-2 py-1 rounded-lg transition-colors">
+                      Analyser
+                    </button>
+                  </div>
+                  {seuilInfo && (
+                    <div className="bg-slate-900/60 border border-slate-700 rounded-xl p-3 space-y-2">
+                      <p className="text-xs text-slate-300">{seuilInfo.message}</p>
+                      {seuilInfo.recommandation != null && (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-slate-400">
+                            <span>Conso moy: <strong className="text-white">{seuilInfo.moyenneMensuelle}/mois</strong></span>
+                            <span className="ml-2">Delai: <strong className="text-white">~{seuilInfo.delaiLivraisonJours}j</strong></span>
+                          </div>
+                          <button onClick={appliquerSeuil}
+                            className="text-xs text-emerald-300 hover:text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded-lg">
+                            Appliquer ({seuilInfo.recommandation})
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Prix TTC */}
+                {sheetForm.prix_unitaire > 0 && (
+                  <div className="border-t border-slate-700 pt-3 mt-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400">Prix HT</span>
+                      <span className="text-white tabular-nums">{formatMoney(sheetForm.prix_unitaire)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs mt-1">
+                      <span className="text-slate-400">TVA (20%)</span>
+                      <span className="text-slate-300 tabular-nums">{formatMoney(sheetForm.prix_unitaire * 0.2)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs mt-1 font-semibold">
+                      <span className="text-slate-300">Prix TTC</span>
+                      <span className="text-emerald-300 tabular-nums">{formatMoney(sheetForm.prix_unitaire * 1.2)}</span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between gap-3 pt-2">
                   <button onClick={() => archiveProduct(produits.find(x => x.id === selectedId))}
                     className="text-xs text-amber-300 hover:text-amber-200 hover:bg-amber-500/10 px-3 py-1.5 rounded-lg transition-colors">
                     Archiver
+                  </button>
+                  <button onClick={() => window.print()}
+                    className="text-xs text-slate-400 hover:text-white hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-colors" title="Imprimer la fiche">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                   </button>
                   <button onClick={saveSheet} disabled={savingSheet}
                     className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg">

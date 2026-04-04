@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -20,7 +21,7 @@ export default function Praticiens() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [editId, setEditId] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [message, setMessage] = useState(null)
+  const { toast, confirm } = useToast()
   const [tab, setTab] = useState('actifs')
 
   const load = async () => {
@@ -34,11 +35,6 @@ export default function Praticiens() {
   }
 
   useEffect(() => { load() }, [])
-
-  const flash = (type, text) => {
-    setMessage({ type, text })
-    setTimeout(() => setMessage(null), 3000)
-  }
 
   const openNew = () => {
     setForm(EMPTY_FORM)
@@ -57,51 +53,49 @@ export default function Praticiens() {
     try {
       if (editId) {
         await window.api.praticiensUpdate(editId, form)
-        flash('success', 'Praticien modifie.')
+        toast('Praticien modifie.', 'success')
       } else {
         await window.api.praticiensAdd(form)
-        flash('success', 'Praticien ajoute.')
+        toast('Praticien ajoute.', 'success')
       }
       setShowForm(false)
       setForm(EMPTY_FORM)
       setEditId(null)
       load()
     } catch (err) {
-      flash('error', err.message)
+      toast(err.message, 'error')
     }
   }
 
   const archive = async (p) => {
-    const confirmed = window.confirm(`Archiver "${p.prenom ? `${p.prenom} ` : ''}${p.nom}" ?`)
-    if (!confirmed) return
+    if (!(await confirm(`Archiver "${p.prenom ? `${p.prenom} ` : ''}${p.nom}" ?`))) return
     try {
       await window.api.praticiensArchive(p.id)
-      flash('success', `"${p.nom}" archive.`)
+      toast(`"${p.nom}" archive.`, 'success')
       load()
     } catch (err) {
-      flash('error', err.message)
+      toast(err.message, 'error')
     }
   }
 
   const restore = async (p) => {
     try {
       await window.api.praticiensRestore(p.id)
-      flash('success', `"${p.nom}" restaure.`)
+      toast(`"${p.nom}" restaure.`, 'success')
       load()
     } catch (err) {
-      flash('error', err.message)
+      toast(err.message, 'error')
     }
   }
 
   const remove = async (p) => {
-    const confirmed = window.confirm(`Supprimer definitivement "${p.prenom ? `${p.prenom} ` : ''}${p.nom}" ? Cette action est irreversible.`)
-    if (!confirmed) return
+    if (!(await confirm(`Supprimer definitivement "${p.prenom ? `${p.prenom} ` : ''}${p.nom}" ? Cette action est irreversible.`))) return
     try {
       await window.api.praticiensDelete(p.id)
-      flash('success', `"${p.nom}" supprime definitivement.`)
+      toast(`"${p.nom}" supprime definitivement.`, 'success')
       load()
     } catch (err) {
-      flash('error', err.message)
+      toast(err.message, 'error')
     }
   }
 
@@ -109,16 +103,6 @@ export default function Praticiens() {
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {message && (
-        <div className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm border ${
-          message.type === 'success'
-            ? 'bg-teal-500/10 border-teal-500/30 text-teal-300'
-            : 'bg-red-500/10 border-red-500/30 text-red-300'
-        }`}>
-          {message.text}
-        </div>
-      )}
-
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="flex rounded-lg bg-slate-900/60 p-0.5">

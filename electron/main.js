@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const zlib = require('zlib')
+const dbHelpers = require('./db')
+const statsHandlers = require('./handlers-stats')
 
 // Empêcher les crashs silencieux
 process.on('uncaughtException', (error) => {
@@ -27,7 +29,6 @@ let dbPath = ''
 let dbFileMtime = 0
 let dbConfigFile = ''
 let storageConfigFile = ''
-let inWriteTransaction = false
 let setupConfig = null
 
 function wait(ms) {
@@ -766,6 +767,9 @@ function appendToReception(receptionId, data) {
       item.produit_id,
     ])
 
+    dbRun(`INSERT INTO prix_historique (produit_id, fournisseur_id, prix_unitaire, date, source)
+      VALUES (?, ?, ?, ?, 'reception')`, [item.produit_id, fournisseurId, prixUnitaire, data.date])
+
     montantTotal += quantite * prixUnitaire
   }
 
@@ -952,6 +956,36 @@ function ensureSchema() {
   ensureColumn('produits', 'archived', 'INTEGER DEFAULT 0')
   ensureColumn('fournisseurs', 'archived', 'INTEGER DEFAULT 0')
   ensureColumn('praticiens', 'archived', 'INTEGER DEFAULT 0')
+
+  // Péremption et traçabilité lots
+  ensureColumn('produits', 'date_peremption', 'DATE')
+  ensureColumn('reception_items', 'lot', 'TEXT')
+  ensureColumn('reception_items', 'date_expiration', 'DATE')
+
+  db.run(`CREATE TABLE IF NOT EXISTS prix_historique (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    produit_id INTEGER REFERENCES produits(id),
+    fournisseur_id INTEGER,
+    prix_unitaire REAL NOT NULL,
+    date TEXT NOT NULL,
+    source TEXT DEFAULT 'reception',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`)
+  db.run('CREATE INDEX IF NOT EXISTS idx_prix_hist_produit ON prix_historique(produit_id)')
+
+  // Remises fournisseurs
+  db.run(`CREATE TABLE IF NOT EXISTS remises_fournisseur (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fournisseur_id INTEGER REFERENCES fournisseurs(id),
+    seuil_quantite INTEGER NOT NULL DEFAULT 0,
+    remise_pourcent REAL NOT NULL DEFAULT 0,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`)
+  db.run('CREATE INDEX IF NOT EXISTS idx_remises_fournisseur ON remises_fournisseur(fournisseur_id)')
+
+  // TVA par produit
+  ensureColumn('produits', 'taux_tva', 'REAL DEFAULT 20')
 
   // Index sur les clés étrangères pour accélérer les jointures
   db.run('CREATE INDEX IF NOT EXISTS idx_produits_fournisseur ON produits(fournisseur_id)')
@@ -1387,8 +1421,8 @@ safeHandle('produits:add', async (_, data) => {
     }
 
     return dbInsert(`INSERT INTO produits (
-      reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire, fournisseur_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
+      reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire, fournisseur_id, date_peremption
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       data.reference,
       data.nom,
       data.categorie,
@@ -1397,6 +1431,7 @@ safeHandle('produits:add', async (_, data) => {
       data.stock_minimum || 0,
       data.prix_unitaire || 0,
       data.fournisseur_id || null,
+      data.date_peremption || null,
     ])
   })
 })
@@ -1408,7 +1443,7 @@ safeHandle('produits:update', async (_, id, data) => {
     }
 
     dbRun(`UPDATE produits
-      SET reference = ?, nom = ?, categorie = ?, unite = ?, stock_actuel = ?, stock_minimum = ?, prix_unitaire = ?, fournisseur_id = ?
+      SET reference = ?, nom = ?, categorie = ?, unite = ?, stock_actuel = ?, stock_minimum = ?, prix_unitaire = ?, fournisseur_id = ?, date_peremption = ?
       WHERE id = ?`, [
       data.reference,
       data.nom,
@@ -1418,6 +1453,7 @@ safeHandle('produits:update', async (_, id, data) => {
       data.stock_minimum,
       data.prix_unitaire,
       data.fournisseur_id,
+      data.date_peremption || null,
       id,
     ])
   })
@@ -1750,6 +1786,9 @@ safeHandle('receptions:add', async (_, data) => {
         quantite,
         item.produit_id,
       ])
+
+      dbRun(`INSERT INTO prix_historique (produit_id, fournisseur_id, prix_unitaire, date, source)
+        VALUES (?, ?, ?, ?, 'reception')`, [item.produit_id, data.fournisseur_id, prixUnitaire, data.date])
 
       montantTotal += quantite * prixUnitaire
     }
@@ -2199,6 +2238,331 @@ safeHandle('db:import', async () => {
   return { imported: importPath, backup: backupPath }
 })
 
+// --- Stats & Analytics ---
+safeHandle('stats:monthly', () => {
+  const months = []
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date()
+    d.setMonth(d.getMonth() - i)
+    const ym = d.toISOString().slice(0, 7)
+    const label = d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
+
+    const achats = dbGet(`SELECT COALESCE(SUM(ri.quantite * ri.prix_unitaire), 0) as total
+      FROM reception_items ri
+      JOIN receptions r ON r.id = ri.reception_id
+      WHERE r.date LIKE ?`, [ym + '%'])
+
+    const conso = dbGet(`SELECT COALESCE(COUNT(DISTINCT u.id), 0) as nb,
+      COALESCE(SUM(ui.quantite), 0) as total_items
+      FROM utilisations u
+      LEFT JOIN utilisation_items ui ON ui.utilisation_id = u.id
+      WHERE u.date LIKE ?`, [ym + '%'])
+
+    const receptions = dbGet(`SELECT COUNT(*) as nb FROM receptions WHERE date LIKE ?`, [ym + '%'])
+
+    months.push({
+      label,
+      month: ym,
+      achats: achats?.total || 0,
+      consommations: conso?.nb || 0,
+      items_consommes: conso?.total_items || 0,
+      receptions: receptions?.nb || 0,
+    })
+  }
+  return months
+})
+
+safeHandle('stats:topProduits', () => {
+  return dbAll(`SELECT p.id, p.nom, p.reference, p.categorie,
+    COALESCE(SUM(ui.quantite), 0) as total_consomme,
+    COUNT(DISTINCT u.id) as nb_soins
+    FROM utilisation_items ui
+    JOIN utilisations u ON u.id = ui.utilisation_id
+    JOIN produits p ON p.id = ui.produit_id
+    WHERE u.date >= date('now', '-6 months')
+    GROUP BY p.id
+    ORDER BY total_consomme DESC
+    LIMIT 10`)
+})
+
+safeHandle('stats:parCategorie', () => {
+  return dbAll(`SELECT categorie, COUNT(*) as nb_produits,
+    SUM(stock_actuel) as stock_total,
+    SUM(stock_actuel * prix_unitaire) as valeur_stock
+    FROM produits WHERE archived = 0 AND categorie IS NOT NULL
+    GROUP BY categorie ORDER BY valeur_stock DESC`)
+})
+
+safeHandle('stats:parFournisseur', () => {
+  return dbAll(`SELECT f.id, f.nom,
+    COUNT(DISTINCT p.id) as nb_produits,
+    COALESCE(SUM(ri.quantite * ri.prix_unitaire), 0) as total_achats
+    FROM fournisseurs f
+    LEFT JOIN produits p ON p.fournisseur_id = f.id AND p.archived = 0
+    LEFT JOIN reception_items ri ON ri.produit_id = p.id
+    LEFT JOIN receptions r ON r.id = ri.reception_id AND r.date >= date('now', '-6 months')
+    WHERE f.archived = 0
+    GROUP BY f.id ORDER BY total_achats DESC`)
+})
+
+safeHandle('stats:alertesPeremption', () => {
+  return dbAll(`SELECT p.id, p.nom, p.reference, p.date_peremption, p.stock_actuel, p.unite
+    FROM produits p
+    WHERE p.archived = 0 AND p.date_peremption IS NOT NULL
+    AND p.date_peremption <= date('now', '+90 days')
+    ORDER BY p.date_peremption ASC`)
+})
+
+safeHandle('stats:valeurStock', () => {
+  const row = dbGet(`SELECT
+    COUNT(*) as nb_produits,
+    SUM(stock_actuel * prix_unitaire) as valeur_totale,
+    SUM(CASE WHEN stock_actuel <= stock_minimum THEN 1 ELSE 0 END) as nb_alertes
+    FROM produits WHERE archived = 0`)
+  return row || { nb_produits: 0, valeur_totale: 0, nb_alertes: 0 }
+})
+
+// --- Commande automatique ---
+safeHandle('commandes:autoGenerate', async () => {
+  const alertProducts = dbAll(`SELECT p.id, p.nom, p.stock_actuel, p.stock_minimum, p.prix_unitaire, p.fournisseur_id
+    FROM produits p WHERE p.archived = 0 AND p.stock_actuel <= p.stock_minimum AND p.fournisseur_id IS NOT NULL`)
+
+  if (alertProducts.length === 0) return { created: 0, commandes: [] }
+
+  // Grouper par fournisseur
+  const byFournisseur = {}
+  alertProducts.forEach(p => {
+    if (!byFournisseur[p.fournisseur_id]) byFournisseur[p.fournisseur_id] = []
+    byFournisseur[p.fournisseur_id].push(p)
+  })
+
+  const createdCommandes = []
+  const today = new Date().toISOString().slice(0, 10)
+
+  await withWriteTransaction(() => {
+    for (const [fournisseurId, produits] of Object.entries(byFournisseur)) {
+      const refNum = Math.floor(Math.random() * 9000) + 1000
+      const ref = `CMD-AUTO-${today.replace(/-/g, '')}-${refNum}`
+
+      dbRun(`INSERT INTO commandes (date_commande, fournisseur_id, reference_commande, statut, notes)
+        VALUES (?, ?, ?, 'EN_ATTENTE', 'Commande generee automatiquement')`,
+        [today, fournisseurId, ref])
+
+      const commandeId = dbGet('SELECT last_insert_rowid() as id').id
+
+      produits.forEach(p => {
+        const qte = Math.max(1, Math.ceil((p.stock_minimum * 2) - p.stock_actuel))
+        dbRun(`INSERT INTO commande_items (commande_id, produit_id, quantite, prix_unitaire)
+          VALUES (?, ?, ?, ?)`, [commandeId, p.id, qte, p.prix_unitaire || 0])
+      })
+
+      createdCommandes.push({ id: commandeId, reference: ref, fournisseur_id: Number(fournisseurId), nb_produits: produits.length })
+    }
+  })
+
+  return { created: createdCommandes.length, commandes: createdCommandes }
+})
+
+// --- Export CSV ---
+safeHandle('export:csv', async (_, type) => {
+  let rows = []
+  let filename = ''
+  let headers = []
+
+  if (type === 'produits') {
+    headers = ['Reference', 'Nom', 'Categorie', 'Unite', 'Stock', 'Seuil', 'Prix HT', 'Fournisseur', 'Peremption']
+    rows = dbAll(`SELECT p.reference, p.nom, p.categorie, p.unite, p.stock_actuel, p.stock_minimum, p.prix_unitaire,
+      f.nom as fournisseur_nom, p.date_peremption
+      FROM produits p LEFT JOIN fournisseurs f ON f.id = p.fournisseur_id
+      WHERE p.archived = 0 ORDER BY p.nom`)
+    rows = rows.map(r => [r.reference || '', r.nom, r.categorie || '', r.unite, r.stock_actuel, r.stock_minimum, r.prix_unitaire, r.fournisseur_nom || '', r.date_peremption || ''])
+    filename = `produits-${new Date().toISOString().slice(0, 10)}.csv`
+  } else if (type === 'commandes') {
+    headers = ['Reference', 'Date', 'Fournisseur', 'Statut', 'Nb produits', 'Notes']
+    rows = dbAll(`SELECT c.reference_commande, c.date_commande, f.nom as fournisseur_nom, c.statut,
+      (SELECT COUNT(*) FROM commande_items ci WHERE ci.commande_id = c.id) as nb_produits, c.notes
+      FROM commandes c LEFT JOIN fournisseurs f ON f.id = c.fournisseur_id ORDER BY c.date_commande DESC`)
+    rows = rows.map(r => [r.reference_commande || '', r.date_commande, r.fournisseur_nom || '', r.statut, r.nb_produits, r.notes || ''])
+    filename = `commandes-${new Date().toISOString().slice(0, 10)}.csv`
+  } else if (type === 'consommations') {
+    headers = ['Date', 'Praticien', 'Type soin', 'Patient', 'Nb produits', 'Notes']
+    rows = dbAll(`SELECT u.date, COALESCE(pr.prenom || ' ' || pr.nom, '-') as praticien, u.type_soin, u.patient_ref,
+      (SELECT COUNT(*) FROM utilisation_items ui WHERE ui.utilisation_id = u.id) as nb_produits, u.notes
+      FROM utilisations u LEFT JOIN praticiens pr ON pr.id = u.praticien_id ORDER BY u.date DESC`)
+    rows = rows.map(r => [r.date, r.praticien, r.type_soin || '', r.patient_ref || '', r.nb_produits, r.notes || ''])
+    filename = `consommations-${new Date().toISOString().slice(0, 10)}.csv`
+  } else if (type === 'fournisseurs') {
+    headers = ['Nom', 'Contact', 'Email', 'Telephone', 'Adresse', 'Nb produits']
+    rows = dbAll(`SELECT f.nom, f.contact_commercial, f.email, f.telephone, f.adresse,
+      (SELECT COUNT(*) FROM produits p WHERE p.fournisseur_id = f.id AND p.archived = 0) as nb_produits
+      FROM fournisseurs f WHERE f.archived = 0 ORDER BY f.nom`)
+    rows = rows.map(r => [r.nom, r.contact_commercial || '', r.email || '', r.telephone || '', r.adresse || '', r.nb_produits])
+    filename = `fournisseurs-${new Date().toISOString().slice(0, 10)}.csv`
+  } else {
+    throw new Error(`Type d'export inconnu: ${type}`)
+  }
+
+  const csvContent = [headers.join(';'), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';'))].join('\n')
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Exporter en CSV',
+    defaultPath: filename,
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+  })
+
+  if (result.canceled || !result.filePath) return null
+
+  fs.writeFileSync(result.filePath, '\uFEFF' + csvContent, 'utf-8')
+  return result.filePath
+})
+
+// --- Prix historique ---
+safeHandle('prix:historique', (_, produitId) => {
+  return dbAll(`SELECT ph.*, f.nom as fournisseur_nom
+    FROM prix_historique ph
+    LEFT JOIN fournisseurs f ON f.id = ph.fournisseur_id
+    WHERE ph.produit_id = ?
+    ORDER BY ph.date DESC LIMIT 50`, [produitId])
+})
+
+// --- Recherche globale ---
+safeHandle('search:global', (_, query) => {
+  if (!query || query.trim().length < 2) return { produits: [], fournisseurs: [], commandes: [] }
+  const q = `%${query.trim()}%`
+
+  const produits = dbAll(`SELECT id, reference, nom, categorie, stock_actuel, stock_minimum, unite
+    FROM produits WHERE archived = 0 AND (nom LIKE ? OR reference LIKE ? OR categorie LIKE ?)
+    ORDER BY nom LIMIT 10`, [q, q, q])
+
+  const fournisseurs = dbAll(`SELECT id, nom, contact_commercial, email
+    FROM fournisseurs WHERE archived = 0 AND (nom LIKE ? OR contact_commercial LIKE ? OR email LIKE ?)
+    ORDER BY nom LIMIT 5`, [q, q, q])
+
+  const commandes = dbAll(`SELECT c.id, c.reference_commande, c.date_commande, c.statut, f.nom as fournisseur_nom
+    FROM commandes c LEFT JOIN fournisseurs f ON f.id = c.fournisseur_id
+    WHERE c.reference_commande LIKE ? OR f.nom LIKE ?
+    ORDER BY c.date_commande DESC LIMIT 5`, [q, q])
+
+  return { produits, fournisseurs, commandes }
+})
+
+// Analyse de consommation - recommandation de seuils
+safeHandle('produits:seuilRecommande', (_, produitId) => {
+  // Analyser la consommation des 6 derniers mois
+  const sixMonthsAgo = new Date()
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+  const dateLimit = sixMonthsAgo.toISOString().slice(0, 10)
+
+  const consos = dbAll(`
+    SELECT ui.quantite, u.date
+    FROM utilisation_items ui
+    JOIN utilisations u ON u.id = ui.utilisation_id
+    WHERE ui.produit_id = ? AND u.date >= ?
+    ORDER BY u.date ASC
+  `, [produitId, dateLimit])
+
+  if (consos.length === 0) {
+    return { recommandation: null, message: 'Pas assez de donnees de consommation (aucune utilisation sur 6 mois).' }
+  }
+
+  // Calcul conso totale et moyenne par mois
+  const totalQty = consos.reduce((s, c) => s + Number(c.quantite || 0), 0)
+  const months = new Set(consos.map(c => c.date.slice(0, 7)))
+  const nbMonths = Math.max(months.size, 1)
+  const moyenneMensuelle = totalQty / nbMonths
+
+  // Calcul du delai moyen de livraison (temps entre commande et reception)
+  const delais = dbAll(`
+    SELECT AVG(julianday(r.date) - julianday(c.date_commande)) as avg_delai
+    FROM receptions r
+    JOIN commandes c ON c.id = r.commande_id
+    WHERE r.date >= ? AND c.date_commande IS NOT NULL
+  `, [dateLimit])
+
+  const delaiJours = delais[0]?.avg_delai || 14 // 14 jours par defaut
+
+  // Seuil = (conso mensuelle / 30) * delai livraison * 1.3 (marge securite 30%)
+  const consoJournaliere = moyenneMensuelle / 30
+  const seuil = Math.ceil(consoJournaliere * delaiJours * 1.3)
+
+  // Mois les plus consommateurs
+  const parMois = {}
+  consos.forEach(c => {
+    const m = c.date.slice(0, 7)
+    parMois[m] = (parMois[m] || 0) + Number(c.quantite || 0)
+  })
+
+  return {
+    recommandation: seuil,
+    moyenneMensuelle: Math.round(moyenneMensuelle * 10) / 10,
+    delaiLivraisonJours: Math.round(delaiJours),
+    nbUtilisations: consos.length,
+    totalConsomme: totalQty,
+    parMois,
+    message: `Seuil recommande : ${seuil} unites (basé sur ${moyenneMensuelle.toFixed(1)} unites/mois, delai livraison ~${Math.round(delaiJours)}j, marge securite 30%).`
+  }
+})
+
+// Remises fournisseurs CRUD
+safeHandle('remises:list', (_, fournisseurId) => {
+  return dbAll('SELECT * FROM remises_fournisseur WHERE fournisseur_id = ? ORDER BY seuil_quantite ASC', [fournisseurId])
+})
+
+safeHandle('remises:add', async (_, data) => {
+  return withWriteTransaction(() => {
+    dbRun('INSERT INTO remises_fournisseur (fournisseur_id, seuil_quantite, remise_pourcent, description) VALUES (?, ?, ?, ?)',
+      [data.fournisseur_id, data.seuil_quantite, data.remise_pourcent, data.description || null])
+  })
+})
+
+safeHandle('remises:update', async (_, id, data) => {
+  return withWriteTransaction(() => {
+    dbRun('UPDATE remises_fournisseur SET seuil_quantite = ?, remise_pourcent = ?, description = ? WHERE id = ?',
+      [data.seuil_quantite, data.remise_pourcent, data.description || null, id])
+  })
+})
+
+safeHandle('remises:delete', async (_, id) => {
+  return withWriteTransaction(() => {
+    dbRun('DELETE FROM remises_fournisseur WHERE id = ?', [id])
+  })
+})
+
+// Calcul prix avec remise
+safeHandle('prix:calculer', (_, { prixUnitaireHT, quantite, tauxTva, fournisseurId }) => {
+  const tva = tauxTva || 20
+  let remisePourcent = 0
+  let remiseDescription = ''
+
+  if (fournisseurId) {
+    const remises = dbAll('SELECT * FROM remises_fournisseur WHERE fournisseur_id = ? AND seuil_quantite <= ? ORDER BY seuil_quantite DESC LIMIT 1',
+      [fournisseurId, quantite])
+    if (remises.length > 0) {
+      remisePourcent = remises[0].remise_pourcent
+      remiseDescription = remises[0].description || `Remise ${remisePourcent}%`
+    }
+  }
+
+  const totalHT = prixUnitaireHT * quantite
+  const montantRemise = totalHT * (remisePourcent / 100)
+  const totalHTRemise = totalHT - montantRemise
+  const montantTVA = totalHTRemise * (tva / 100)
+  const totalTTC = totalHTRemise + montantTVA
+
+  return {
+    prixUnitaireHT,
+    quantite,
+    totalHT: Math.round(totalHT * 100) / 100,
+    remisePourcent,
+    remiseDescription,
+    montantRemise: Math.round(montantRemise * 100) / 100,
+    totalHTRemise: Math.round(totalHTRemise * 100) / 100,
+    tauxTva: tva,
+    montantTVA: Math.round(montantTVA * 100) / 100,
+    totalTTC: Math.round(totalTTC * 100) / 100,
+  }
+})
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -2217,6 +2581,13 @@ function createWindow() {
 
   if (app.isPackaged) {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    // Auto-update
+    try {
+      const autoUpdate = require('./auto-update')
+      autoUpdate.init(mainWindow)
+    } catch (e) {
+      console.error('[DentaStock] Auto-update init error:', e.message)
+    }
   } else {
     mainWindow.loadURL('http://localhost:5173')
   }

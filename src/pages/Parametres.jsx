@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -27,9 +28,8 @@ export default function Parametres() {
   const [backupInfo, setBackupInfo] = useState(null)
   const [folderPath, setFolderPath] = useState('')
   const [loading, setLoading] = useState(true)
+  const { toast, confirm } = useToast()
   const [saving, setSaving] = useState(false)
-  const [success, setSuccess] = useState('')
-  const [error, setError] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -46,7 +46,7 @@ export default function Parametres() {
         setBackupInfo(nextBackup)
         setFolderPath(nextStatus.storageRoot || '')
       } catch (err) {
-        setError(err.message || 'Impossible de charger la configuration de stockage.')
+        toast(err.message || 'Impossible de charger la configuration de stockage.', 'error')
       } finally {
         setLoading(false)
       }
@@ -68,19 +68,19 @@ export default function Parametres() {
     const pickedPath = await window.api.dialogOpenDirectory()
     if (pickedPath) {
       setFolderPath(pickedPath)
-      setError('')
+
     }
   }
 
   const saveStorage = async () => {
     if (!folderPath.trim()) {
-      setError('Veuillez renseigner un dossier cible.')
+      toast('Veuillez renseigner un dossier cible.', 'error')
       return
     }
 
     setSaving(true)
-    setError('')
-    setSuccess('')
+
+
 
     try {
       const nextStatus = await window.api.storageSetRoot(folderPath.trim())
@@ -88,12 +88,12 @@ export default function Parametres() {
       setFolderPath(nextStatus.storageRoot || folderPath.trim())
 
       if (nextStatus.databaseState === 'existing') {
-        setSuccess('Le dossier partage a ete applique et la base existante a ete ouverte.')
+        toast('Le dossier partage a ete applique et la base existante a ete ouverte.')
       } else {
-        setSuccess('Le dossier partage a ete applique et la base courante a ete copiee.')
+        toast('Le dossier partage a ete applique et la base courante a ete copiee.')
       }
     } catch (err) {
-      setError(err.message || 'Impossible d appliquer ce dossier partage.')
+      toast(err.message || 'Impossible d appliquer ce dossier partage.', 'error')
     } finally {
       setSaving(false)
     }
@@ -111,24 +111,6 @@ export default function Parametres() {
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {success && (
-        <div className="flex items-center gap-2 bg-cyan-500/10 border border-cyan-500/30 rounded-xl px-5 py-3 text-cyan-200 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          {success}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-3 text-red-200 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" />
-          </svg>
-          {error}
-        </div>
-      )}
-
       {/* Mode serveur/client */}
       {setupConfig && (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -159,7 +141,7 @@ export default function Parametres() {
             </div>
             <button
               onClick={async () => {
-                if (window.confirm('Reinitialiser la configuration serveur/client ? L application redemarrera avec l ecran de configuration.')) {
+                if (await confirm('Reinitialiser la configuration serveur/client ? L application redemarrera avec l ecran de configuration.')) {
                   await window.api.setupReset()
                   window.location.reload()
                 }
@@ -282,13 +264,13 @@ export default function Parametres() {
             <button
               onClick={async () => {
                 if (!isElectron) return
-                setError('')
-                setSuccess('')
+
+
                 try {
                   const path = await window.api.dbExport()
-                  if (path) setSuccess(`Base exportee vers : ${path}`)
+                  if (path) toast(`Base exportee vers : ${path}`)
                 } catch (err) {
-                  setError(err.message)
+                  toast(err.message, 'error')
                 }
               }}
               disabled={!isElectron}
@@ -313,16 +295,16 @@ export default function Parametres() {
             <button
               onClick={async () => {
                 if (!isElectron) return
-                setError('')
-                setSuccess('')
+
+
                 try {
                   const result = await window.api.dbImport()
                   if (result) {
-                    setSuccess(`Base importee depuis : ${result.imported}. Sauvegarde de l'ancienne : ${result.backup}`)
+                    toast(`Base importee depuis : ${result.imported}. Sauvegarde de l'ancienne : ${result.backup}`)
                     load()
                   }
                 } catch (err) {
-                  setError(err.message)
+                  toast(err.message, 'error')
                 }
               }}
               disabled={!isElectron}
@@ -346,12 +328,12 @@ export default function Parametres() {
           <button
             onClick={async () => {
               if (!isElectron) return
-              setError(''); setSuccess('')
+              void 0; void 0
               try {
                 const p = await window.api.backupRunNow()
-                setSuccess(`Sauvegarde manuelle creee : ${p}`)
+                toast(`Sauvegarde manuelle creee : ${p}`)
                 load()
-              } catch (err) { setError(err.message) }
+              } catch (err) { toast(err.message, 'error') }
             }}
             disabled={!isElectron}
             className="bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shrink-0"
@@ -396,13 +378,13 @@ export default function Parametres() {
                       </div>
                       <button
                         onClick={async () => {
-                          if (!window.confirm(`Restaurer la sauvegarde "${b.name}" ? La base actuelle sera sauvegardee avant.`)) return
-                          setError(''); setSuccess('')
+                          if (!(await confirm(`Restaurer la sauvegarde "${b.name}" ? La base actuelle sera sauvegardee avant.`))) return
+          
                           try {
                             const r = await window.api.backupRestore(b.name)
-                            setSuccess(`Base restauree depuis ${r.restored}. Ancienne sauvegardee dans ${r.backup}`)
+                            toast(`Base restauree depuis ${r.restored}. Ancienne sauvegardee dans ${r.backup}`)
                             load()
-                          } catch (err) { setError(err.message) }
+                          } catch (err) { toast(err.message, 'error') }
                         }}
                         className="text-xs text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 px-3 py-1 rounded-lg shrink-0"
                       >
@@ -432,13 +414,13 @@ export default function Parametres() {
                     )}
                     <button
                       onClick={async () => {
-                        setError(''); setSuccess('')
+        
                         try {
                           const r = await window.api.replicaSyncNow()
-                          if (r.success) setSuccess('Replica synchronisee.')
-                          else setError('Impossible de synchroniser (serveur inaccessible).')
+                          if (r.success) toast('Replica synchronisee.')
+                          else toast('Impossible de synchroniser (serveur inaccessible).', 'error')
                           load()
-                        } catch (err) { setError(err.message) }
+                        } catch (err) { toast(err.message, 'error') }
                       }}
                       className="text-xs text-sky-300 hover:text-sky-200 bg-sky-500/10 hover:bg-sky-500/20 px-3 py-1 rounded-lg"
                     >

@@ -138,3 +138,13 @@ html:not(.dark) .bg-slate-800 {
 
 /* --- Dashed borders --- */
 html:not(.dark) .border-dashed.border-slate-700 { border-color: #cbd5e1; }
+
+/* --- Print --- */
+@media print {
+  body { background: white !important; color: black !important; }
+  aside, header, nav, .no-print, .fixed { display: none !important; }
+  main { padding: 0 !important; overflow: visible !important; }
+  .bg-slate-800, .bg-slate-900 { background: white !important; border-color: #ddd !important; }
+  .text-white, .text-slate-300, .text-slate-400 { color: #111 !important; }
+  * { box-shadow: none !important; }
+}
