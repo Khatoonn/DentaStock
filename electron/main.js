@@ -28,6 +28,7 @@ let mainWindow = null
 let dbPath = ''
 let dbFileMtime = 0
 let dbConfigFile = ''
+let inWriteTransaction = false
 let storageConfigFile = ''
 let setupConfig = null
 
