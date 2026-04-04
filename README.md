@@ -63,7 +63,18 @@ npm run dev
 npm run pack
 ```
 
-Genere `dist/DentaStock Setup 2.1.0.exe`
+Genere `dist/DentaStock Setup 2.2.0.exe`
+
+### Base de demonstration
+
+Un generateur de donnees fictives est inclus pour les presentations :
+
+```bash
+python generate-demo-db.py
+```
+
+Genere une base avec 6 mois d'activite : 43 produits, 5 fournisseurs avec remises,
+5 praticiens, 30 commandes, 1400+ actes de soins, historique des prix, alertes stock et peremption.
 
 ## Licence
 
