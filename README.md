@@ -2,12 +2,12 @@
 
 Application de gestion de stock pour cabinet dentaire, multi-postes en reseau local (serveur/client).
 
-**[Telecharger l'installateur Windows (v2.3.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.3.0)**
+**[Telecharger l'installateur Windows (v2.4.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.4.0)**
 
 ## Fonctionnalites
 
-- **Tableau de bord** — Vue d'ensemble avec KPIs, alertes stock, alertes peremption (produits + lots), commandes en cours, depenses mensuelles
-- **Commandes & Receptions** — Cycle complet : creation de commande, commande automatique, reception partielle/totale, tracabilite des lots, bouton "Tout receptionne" / "Reception complete"
+- **Tableau de bord** — Vue d'ensemble avec KPIs, alertes stock, alertes peremption (produits + lots), commandes en cours, depenses mensuelles, sante du systeme (mode poste, etat serveur, replica, derniere sauvegarde, mode lecture/ecriture)
+- **Commandes & Receptions** — Cycle complet : creation de commande, commande automatique, reception partielle/totale, tracabilite des lots, bouton "Tout receptionne" / "Reception complete", alerte reception incomplete (choix partielle ou ajustement commande)
 - **Export PDF bon de commande** — Generation de bons de commande professionnels en PDF (en-tete cabinet, coordonnees fournisseur, tableau produits)
 - **Produits & Stock** — Catalogue avec categories, code-barres EAN, peremption, seuils intelligents, historique des prix, pagination
 - **Inventaire physique** — Onglet dedie pour comparer stock theorique vs reel et appliquer les ajustements en lot
@@ -25,6 +25,7 @@ Application de gestion de stock pour cabinet dentaire, multi-postes en reseau lo
 - **Seuils intelligents** — Analyse de consommation pour recommander les seuils optimaux
 - **Prix HT/TTC** — Affichage des prix avec TVA, remises fournisseur automatiques
 - **Mise a jour automatique** — Notification et installation des nouvelles versions via GitHub Releases
+- **Chargement a la demande** — Pages chargees dynamiquement (lazy loading) pour un demarrage plus rapide
 
 ### Architecture serveur/client
 
@@ -33,7 +34,9 @@ Application de gestion de stock pour cabinet dentaire, multi-postes en reseau lo
 
 ### Sauvegardes automatiques
 
-- Sauvegarde mensuelle compressee (.db.gz)
+- Sauvegarde hebdomadaire roulante sur 8 semaines
+- Sauvegarde mensuelle compressee (.db.gz) sur 12 mois
+- Point de restauration compresse automatique avant import et avant restauration
 - Historique des sauvegardes consultable et restaurable depuis les Parametres
 - Export/import complet de la base de donnees
 
@@ -43,7 +46,7 @@ Application de gestion de stock pour cabinet dentaire, multi-postes en reseau lo
 |-----------|------------|
 | Desktop | Electron 29 |
 | Frontend | React 18 + React Router 6 |
-| Build | Vite 5 |
+| Build | Vite 5 (code-split / lazy loading) |
 | Styles | Tailwind CSS 3 |
 | Base de donnees | SQLite via sql.js (WASM) |
 | Graphiques | Recharts |
@@ -65,7 +68,7 @@ npm run dev
 npm run pack
 ```
 
-Genere `dist/DentaStock Setup 2.3.0.exe`
+Genere `dist/DentaStock Setup 2.4.0.exe`
 
 ### Base de demonstration
 

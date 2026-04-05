@@ -1,6 +1,6 @@
 {
   "name": "dentastock",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Gestion de stock pour cabinet dentaire",
   "author": "DentaStock",
   "main": "electron/main.js",

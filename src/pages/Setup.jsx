@@ -1,10 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function Setup({ onComplete }) {
   const [mode, setMode] = useState(null)
   const [networkPath, setNetworkPath] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [defaults, setDefaults] = useState(null)
+
+  useEffect(() => {
+    if (!window.api?.setupGetDefaults) return
+    window.api.setupGetDefaults().then(setDefaults).catch(() => setDefaults(null))
+  }, [])
+
+  const serverDataPath = defaults?.serverDataPath || '...'
+  const serverShareName = serverDataPath.split(/[\\/]/).filter(Boolean).pop() || 'data'
+  const serverShareExample = `\\\\NOM-DU-PC\\${serverShareName}`
 
   const browse = async () => {
     const folder = await window.api.setupBrowseFolder()
@@ -100,17 +110,17 @@ export default function Setup({ onComplete }) {
               </div>
               <div>
                 <h3 className="font-semibold text-white">Mode Serveur</h3>
-                <p className="text-xs text-slate-400 mt-0.5">La base sera stockee localement dans C:\DentaStock\data\</p>
+                <p className="text-xs text-slate-400 mt-0.5">La base sera stockee localement dans {serverDataPath}</p>
               </div>
             </div>
 
             <div className="bg-slate-900/60 border border-slate-700 rounded-lg p-4 space-y-3">
               <h4 className="text-sm font-medium text-white">Apres l'installation :</h4>
               <ol className="text-sm text-slate-400 space-y-2 list-decimal list-inside">
-                <li>Partagez le dossier <code className="text-sky-300 bg-slate-700 px-1.5 py-0.5 rounded text-xs">C:\DentaStock\data</code> sur le reseau Windows</li>
+                <li>Partagez le dossier <code className="text-sky-300 bg-slate-700 px-1.5 py-0.5 rounded text-xs">{serverDataPath}</code> sur le reseau Windows</li>
                 <li>Clic droit sur le dossier &rarr; Proprietes &rarr; Partage &rarr; Partager</li>
                 <li>Donnez les droits de lecture/ecriture aux utilisateurs du cabinet</li>
-                <li>Notez le chemin reseau (ex: <code className="text-sky-300 bg-slate-700 px-1.5 py-0.5 rounded text-xs">\\NOM-DU-PC\data</code>)</li>
+                <li>Notez le chemin reseau (ex: <code className="text-sky-300 bg-slate-700 px-1.5 py-0.5 rounded text-xs">{serverShareExample}</code>)</li>
               </ol>
             </div>
 

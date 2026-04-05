@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
@@ -16,6 +17,8 @@ const ROLES = [
 const EMPTY_FORM = { nom: '', prenom: '', role: 'chirurgien-dentiste' }
 
 export default function Praticiens() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const preselectedPraticienId = Number(searchParams.get('praticien') || 0)
   const [praticiens, setPraticiens] = useState([])
   const [archivedPraticiens, setArchivedPraticiens] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
@@ -35,6 +38,22 @@ export default function Praticiens() {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (!preselectedPraticienId || praticiens.length === 0) return
+
+    const praticien = praticiens.find(p => p.id === preselectedPraticienId)
+    if (!praticien) return
+
+    setTab('actifs')
+    openEdit(praticien)
+
+    setSearchParams(current => {
+      const next = new URLSearchParams(current)
+      next.delete('praticien')
+      return next
+    }, { replace: true })
+  }, [preselectedPraticienId, praticiens, setSearchParams])
 
   const openNew = () => {
     setForm(EMPTY_FORM)

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('api', {
   // Setup serveur/client
   setupGetConfig: () => ipcRenderer.invoke('setup:getConfig'),
+  setupGetDefaults: () => ipcRenderer.invoke('setup:getDefaults'),
   setupConfigure: config => ipcRenderer.invoke('setup:configure', config),
   setupBrowseFolder: () => ipcRenderer.invoke('setup:browseFolder'),
   setupReset: () => ipcRenderer.invoke('setup:reset'),
@@ -12,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   backupRunNow: () => ipcRenderer.invoke('backup:runNow'),
   backupRestore: name => ipcRenderer.invoke('backup:restore', name),
   replicaSyncNow: () => ipcRenderer.invoke('replica:syncNow'),
+  serverGetStatus: () => ipcRenderer.invoke('server:getStatus'),
+  serverRetryConnection: () => ipcRenderer.invoke('server:retryConnection'),
 
   // Config
   configGet: cle => ipcRenderer.invoke('config:get', cle),

@@ -39,10 +39,10 @@ export default function GlobalSearch() {
       setLoading(true)
       try {
         const r = await window.api.searchGlobal(query.trim())
-        // Flatten results from { produits, fournisseurs, commandes } into a single array
         const flat = []
         if (r?.produits) r.produits.forEach(p => flat.push({ type: 'produit', id: p.id, nom: p.nom, detail: `${p.reference || ''} - ${p.categorie || 'Sans categorie'} - Stock: ${p.stock_actuel} ${p.unite || ''}` }))
         if (r?.fournisseurs) r.fournisseurs.forEach(f => flat.push({ type: 'fournisseur', id: f.id, nom: f.nom, detail: f.contact_commercial || f.email || '' }))
+        if (r?.praticiens) r.praticiens.forEach(p => flat.push({ type: 'praticien', id: p.id, nom: `${p.prenom ? `${p.prenom} ` : ''}${p.nom}`.trim(), detail: p.role || '' }))
         if (r?.commandes) r.commandes.forEach(c => flat.push({ type: 'commande', id: c.id, nom: c.reference_commande || `Commande #${c.id}`, detail: `${c.fournisseur_nom || ''} - ${c.statut}` }))
         setResults(flat)
       } catch { setResults([]) }
@@ -52,13 +52,19 @@ export default function GlobalSearch() {
 
   const goTo = (item) => {
     setOpen(false)
-    if (item.type === 'produit') navigate('/produits')
-    else if (item.type === 'fournisseur') navigate('/fournisseurs')
-    else if (item.type === 'praticien') navigate('/praticiens')
+    if (item.type === 'produit') navigate(`/produits?produit=${item.id}`)
+    else if (item.type === 'fournisseur') navigate(`/fournisseurs?fournisseur=${item.id}`)
+    else if (item.type === 'praticien') navigate(`/praticiens?praticien=${item.id}`)
+    else if (item.type === 'commande') navigate(`/reception?commande=${item.id}`)
   }
 
-  const typeLabels = { produit: 'Produit', fournisseur: 'Fournisseur', praticien: 'Praticien' }
-  const typeColors = { produit: 'bg-sky-500/20 text-sky-400', fournisseur: 'bg-rose-500/20 text-rose-400', praticien: 'bg-teal-500/20 text-teal-400' }
+  const typeLabels = { produit: 'Produit', fournisseur: 'Fournisseur', praticien: 'Praticien', commande: 'Commande' }
+  const typeColors = {
+    produit: 'bg-sky-500/20 text-sky-400',
+    fournisseur: 'bg-rose-500/20 text-rose-400',
+    praticien: 'bg-teal-500/20 text-teal-400',
+    commande: 'bg-amber-500/20 text-amber-300',
+  }
 
   if (!open) {
     return (
@@ -90,7 +96,7 @@ export default function GlobalSearch() {
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Rechercher produits, fournisseurs, praticiens..."
+            placeholder="Rechercher produits, fournisseurs, praticiens, commandes..."
             className="flex-1 bg-transparent text-white text-sm outline-none placeholder-slate-500"
           />
           <kbd className="text-[10px] text-slate-500 bg-slate-700 px-1.5 py-0.5 rounded font-mono">Esc</kbd>

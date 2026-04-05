@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
@@ -40,6 +41,8 @@ function createEmptyForm() {
 }
 
 export default function Fournisseurs() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const preselectedFournisseurId = Number(searchParams.get('fournisseur') || 0)
   const [fournisseurs, setFournisseurs] = useState([])
   const [archivedFournisseurs, setArchivedFournisseurs] = useState([])
   const [produits, setProduits] = useState([])
@@ -73,6 +76,23 @@ export default function Fournisseurs() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    if (!preselectedFournisseurId || fournisseurs.length === 0) return
+
+    const fournisseur = fournisseurs.find(f => f.id === preselectedFournisseurId)
+    if (!fournisseur) return
+
+    setTab('actifs')
+    setSearch(fournisseur.nom || '')
+    setSelectedId(fournisseur.id)
+
+    setSearchParams(current => {
+      const next = new URLSearchParams(current)
+      next.delete('fournisseur')
+      return next
+    }, { replace: true })
+  }, [preselectedFournisseurId, fournisseurs, setSearchParams])
 
 
   const produitCountByFournisseur = useMemo(() => {

@@ -37,13 +37,23 @@ const DEMO_STATS = {
 }
 
 const DEMO_MONTHLY = [
-  { mois: 'Nov 2025', total: 3250.40 },
-  { mois: 'Dec 2025', total: 2180.60 },
-  { mois: 'Jan 2026', total: 2890.30 },
-  { mois: 'Fev 2026', total: 1950.80 },
-  { mois: 'Mar 2026', total: 3420.70 },
-  { mois: 'Avr 2026', total: 1847.50 },
+  { label: 'nov. 25', achats: 3250.40 },
+  { label: 'dec. 25', achats: 2180.60 },
+  { label: 'janv. 26', achats: 2890.30 },
+  { label: 'fevr. 26', achats: 1950.80 },
+  { label: 'mars 26', achats: 3420.70 },
+  { label: 'avr. 26', achats: 1847.50 },
 ]
+
+const DEMO_SYSTEM = {
+  setupMode: 'server',
+  readOnly: false,
+  serverReachable: null,
+  replicaFresh: null,
+  replicaLastSync: null,
+  lastWeeklyBackup: '2026-04-03T08:15:00.000Z',
+  lastMonthlyBackup: '2026-04-01T08:00:00.000Z',
+}
 
 const moneyFormatter = new Intl.NumberFormat('fr-FR', {
   minimumFractionDigits: 2,
@@ -52,6 +62,35 @@ const moneyFormatter = new Intl.NumberFormat('fr-FR', {
 
 function formatMoney(value) {
   return `${moneyFormatter.format(Number(value || 0))} \u20ac`
+}
+
+function formatDateTime(value) {
+  if (!value) return 'Aucune'
+  return new Date(value).toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function HealthPill({ label, value, sub, tone = 'slate' }) {
+  const tones = {
+    slate: 'bg-slate-900/60 border-slate-700 text-slate-200',
+    green: 'bg-green-500/10 border-green-500/20 text-green-200',
+    amber: 'bg-amber-500/10 border-amber-500/20 text-amber-200',
+    red: 'bg-red-500/10 border-red-500/20 text-red-200',
+    sky: 'bg-sky-500/10 border-sky-500/20 text-sky-200',
+  }
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 min-w-0 ${tones[tone] || tones.slate}`}>
+      <div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-sm font-semibold mt-1 break-words">{value}</div>
+      {sub && <div className="text-xs text-slate-400 mt-1 break-words">{sub}</div>}
+    </div>
+  )
 }
 
 function StatCard({ label, value, sub, color, icon }) {
@@ -73,20 +112,63 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [stats, setStats] = useState(null)
   const [monthly, setMonthly] = useState([])
+  const [systemHealth, setSystemHealth] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let interval = null
+
+    const loadSystemHealth = async () => {
+      if (!isElectron) {
+        setSystemHealth(DEMO_SYSTEM)
+        return
+      }
+
+      const [backupInfo, setupConfig, serverStatus] = await Promise.all([
+        window.api.backupStatus(),
+        window.api.setupGetConfig(),
+        window.api.serverGetStatus ? window.api.serverGetStatus() : Promise.resolve(null),
+      ])
+
+      const replicaLastSync = backupInfo?.replica?.lastSync || null
+      const replicaFresh = replicaLastSync
+        ? (Date.now() - new Date(replicaLastSync).getTime()) <= (15 * 60 * 1000)
+        : null
+
+      setSystemHealth({
+        setupMode: setupConfig?.mode || null,
+        readOnly: Boolean(serverStatus?.readOnly),
+        serverReachable: serverStatus?.serverReachable ?? null,
+        replicaFresh,
+        replicaLastSync,
+        lastWeeklyBackup: backupInfo?.lastWeeklyBackup || null,
+        lastMonthlyBackup: backupInfo?.lastMonthlyBackup || null,
+      })
+    }
+
     if (isElectron) {
       Promise.all([
         window.api.statsDashboard(),
         window.api.statsMonthly(),
-      ]).then(([s, m]) => { setStats(s); setMonthly(m) }).finally(() => setLoading(false))
+      ]).then(([s, m]) => {
+        setStats(s)
+        setMonthly(m)
+      }).finally(() => setLoading(false))
+      void loadSystemHealth()
+      interval = setInterval(() => {
+        void loadSystemHealth()
+      }, 15000)
     } else {
       setTimeout(() => {
         setStats(DEMO_STATS)
         setMonthly(DEMO_MONTHLY)
+        setSystemHealth(DEMO_SYSTEM)
         setLoading(false)
       }, 300)
+    }
+
+    return () => {
+      if (interval) clearInterval(interval)
     }
   }, [])
 
@@ -106,6 +188,41 @@ export default function Dashboard() {
     alertesPeremption = [],
     alertesLots = [],
   } = stats
+
+  const latestBackup = [systemHealth?.lastWeeklyBackup, systemHealth?.lastMonthlyBackup]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null
+
+  const modeLabel = systemHealth?.setupMode === 'server'
+    ? 'Serveur'
+    : systemHealth?.setupMode === 'client'
+      ? 'Client'
+      : 'Local'
+
+  const connectionValue = systemHealth?.setupMode === 'client'
+    ? (systemHealth?.serverReachable ? 'Serveur connecte' : 'Serveur indisponible')
+    : systemHealth?.setupMode === 'server'
+      ? 'Serveur principal'
+      : 'Mode local'
+
+  const connectionTone = systemHealth?.setupMode === 'client'
+    ? (systemHealth?.serverReachable ? 'green' : 'red')
+    : 'sky'
+
+  const replicaValue = systemHealth?.setupMode === 'client'
+    ? systemHealth?.replicaLastSync
+      ? (systemHealth?.replicaFresh ? 'Replica a jour' : 'Replica a verifier')
+      : 'Aucune replica'
+    : 'Non applicable'
+
+  const replicaTone = systemHealth?.setupMode === 'client'
+    ? systemHealth?.replicaLastSync
+      ? (systemHealth?.replicaFresh ? 'green' : 'amber')
+      : 'red'
+    : 'slate'
+
+  const writeModeValue = systemHealth?.readOnly ? 'Lecture seule' : 'Ecriture autorisee'
+  const writeModeTone = systemHealth?.readOnly ? 'amber' : 'green'
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -167,6 +284,24 @@ export default function Dashboard() {
           icon={<svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
       </div>
+
+      {systemHealth && (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Sante du systeme</h3>
+              <p className="text-xs text-slate-500 mt-1">Connexion serveur, replica locale et sauvegardes automatiques.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+            <HealthPill label="Mode du poste" value={modeLabel} sub={systemHealth?.setupMode === 'client' ? 'Connecte au serveur du cabinet' : systemHealth?.setupMode === 'server' ? 'Ce poste porte la base de reference' : 'Base locale uniquement'} tone="sky" />
+            <HealthPill label="Connexion serveur" value={connectionValue} sub={systemHealth?.setupMode === 'client' ? 'Retour automatique des que le serveur revient' : 'Pas de dependance reseau'} tone={connectionTone} />
+            <HealthPill label="Replica locale" value={replicaValue} sub={systemHealth?.replicaLastSync ? `Derniere synchro: ${formatDateTime(systemHealth.replicaLastSync)}` : 'Aucune synchro disponible'} tone={replicaTone} />
+            <HealthPill label="Derniere sauvegarde auto" value={latestBackup ? formatDateTime(latestBackup) : 'Aucune'} sub={`Hebdo: ${systemHealth?.lastWeeklyBackup ? formatDateTime(systemHealth.lastWeeklyBackup) : 'Aucune'} | Mensuelle: ${systemHealth?.lastMonthlyBackup ? formatDateTime(systemHealth.lastMonthlyBackup) : 'Aucune'}`} tone={latestBackup ? 'green' : 'amber'} />
+            <HealthPill label="Mode d ecriture" value={writeModeValue} sub={systemHealth?.readOnly ? 'Les modifications sont bloquees tant que le serveur reste indisponible' : 'Les saisies sont immediatement persistantes'} tone={writeModeTone} />
+          </div>
+        </div>
+      )}
 
       {monthly.length > 0 && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
@@ -320,7 +455,7 @@ export default function Dashboard() {
                   <div key={`l-${i}`} className="flex items-center justify-between gap-4 px-5 py-3">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-white truncate">{a.nom}</div>
-                      <div className="text-xs text-slate-500">Lot {a.lot || '?'} — {a.quantite} {a.unite}</div>
+                      <div className="text-xs text-slate-500">Lot {a.lot || '?'} - {a.quantite} {a.unite}</div>
                     </div>
                     <div className="text-right shrink-0">
                       <div className={`text-sm font-bold tabular-nums ${j <= 0 ? 'text-red-400' : j <= 30 ? 'text-amber-400' : 'text-slate-300'}`}>

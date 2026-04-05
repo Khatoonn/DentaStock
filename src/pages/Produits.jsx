@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
@@ -53,6 +54,8 @@ function buildCategoryRecords(categories, produits) {
 
 export default function Produits() {
   const sheetRef = useRef(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const preselectedProductId = Number(searchParams.get('produit') || 0)
 
   // Data
   const [produits, setProduits] = useState([])
@@ -378,6 +381,27 @@ export default function Produits() {
     if (!p) { closeSheet(); return }
     setSheetForm(f => f ? { ...f } : null)
   }, [produits, selectedId])
+
+  useEffect(() => {
+    if (!preselectedProductId || produits.length === 0) return
+
+    const product = produits.find(p => p.id === preselectedProductId)
+    if (!product) return
+
+    setTab('actifs')
+    setFilter(current => ({
+      ...current,
+      search: product.nom || current.search,
+      categorie: product.categorie || '',
+    }))
+    void openSheet(product)
+
+    setSearchParams(current => {
+      const next = new URLSearchParams(current)
+      next.delete('produit')
+      return next
+    }, { replace: true })
+  }, [preselectedProductId, produits, setSearchParams])
 
   return (
     <div className="space-y-6 w-full min-w-0">

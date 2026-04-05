@@ -322,7 +322,7 @@ export default function Parametres() {
           <div>
             <h3 className="text-lg font-semibold text-white">Sauvegardes automatiques</h3>
             <p className="text-sm text-slate-400 mt-1">
-              Sauvegarde mensuelle comprimee + nettoyage des donnees de plus d'un an.
+              Sauvegarde hebdomadaire roulante sur 8 semaines, mensuelle compressee sur 12 mois, et point de restauration auto avant import ou restauration.
             </p>
           </div>
           <button
@@ -344,9 +344,21 @@ export default function Parametres() {
 
         {backupInfo && (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="text-xs text-slate-500">
+              Les donnees metier ne sont plus purgees automatiquement. Les sauvegardes anciennes sont simplement retirees au fil de l eau.
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
               <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
-                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Derniere sauvegarde</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Derniere sauvegarde hebdo</div>
+                <div className="text-sm font-medium text-white mt-2">
+                  {backupInfo.lastWeeklyBackup
+                    ? new Date(backupInfo.lastWeeklyBackup).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+                    : 'Aucune'
+                  }
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Derniere sauvegarde mensuelle</div>
                 <div className="text-sm font-medium text-white mt-2">
                   {backupInfo.lastMonthlyBackup
                     ? new Date(backupInfo.lastMonthlyBackup).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })

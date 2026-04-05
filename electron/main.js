@@ -66,6 +66,10 @@ function getInstallDir() {
   return path.join(__dirname, '..')
 }
 
+function getServerLocalDataPath() {
+  return path.join(getInstallDir(), 'data')
+}
+
 function getSetupConfigPath() {
   return path.join(getInstallDir(), SETUP_CONFIG_FILENAME)
 }
@@ -90,6 +94,11 @@ function saveSetupConfig(config) {
 // --- Replication client ---
 let replicaInterval = null
 
+function getConfiguredClientServerDbPath(config = setupConfig) {
+  if (!config || config.mode !== 'client' || !config.dataPath) return null
+  return path.join(config.dataPath, DB_FILENAME)
+}
+
 function getReplicaDir() {
   return path.join(getInstallDir(), 'data', 'replica')
 }
@@ -101,7 +110,7 @@ function getReplicaDbPath() {
 function replicateFromServer() {
   if (!setupConfig || setupConfig.mode !== 'client' || !setupConfig.dataPath) return false
 
-  const serverDb = path.join(setupConfig.dataPath, DB_FILENAME)
+  const serverDb = getConfiguredClientServerDbPath()
   try {
     if (!fs.existsSync(serverDb)) return false
 
@@ -121,26 +130,80 @@ function replicateFromServer() {
   }
 }
 
-function startReplicaSync(intervalMs = 5 * 60 * 1000) {
-  if (replicaInterval) clearInterval(replicaInterval)
-  // Synchro initiale
-  replicateFromServer()
-  // Synchro periodique
-  replicaInterval = setInterval(() => replicateFromServer(), intervalMs)
-}
+function getClientConnectionStatus(config = setupConfig) {
+  if (!config || config.mode !== 'client') {
+    return {
+      mode: config?.mode || null,
+      dataPath: config?.dataPath || null,
+      serverDbPath: null,
+      serverReachable: null,
+      replicaDbPath: null,
+      replicaAvailable: false,
+      usingReplica: false,
+      readOnly: false,
+      activeDbPath: dbPath || null,
+    }
+  }
 
-function isServerReachable() {
-  if (!setupConfig || setupConfig.mode !== 'client' || !setupConfig.dataPath) return true
+  const serverDbPath = getConfiguredClientServerDbPath(config)
+  const replicaDbPath = getReplicaDbPath()
+
+  let serverReachable = false
   try {
-    return fs.existsSync(path.join(setupConfig.dataPath, DB_FILENAME))
+    serverReachable = Boolean(serverDbPath && fs.existsSync(serverDbPath))
   } catch {
-    return false
+    serverReachable = false
+  }
+
+  const replicaAvailable = fs.existsSync(replicaDbPath)
+  const activeResolved = dbPath ? path.resolve(dbPath) : ''
+  const replicaResolved = path.resolve(replicaDbPath)
+
+  return {
+    mode: 'client',
+    dataPath: config.dataPath,
+    serverDbPath,
+    serverReachable,
+    replicaDbPath,
+    replicaAvailable,
+    usingReplica: activeResolved === replicaResolved,
+    readOnly: !serverReachable,
+    activeDbPath: dbPath || null,
   }
 }
 
+function syncClientConnectionState({ syncReplica = false, allowSwitch = true } = {}) {
+  const status = getClientConnectionStatus()
+  if (status.mode !== 'client') return status
+
+  if (status.serverReachable) {
+    if (allowSwitch && status.serverDbPath && status.activeDbPath && path.resolve(status.activeDbPath) !== path.resolve(status.serverDbPath)) {
+      switchDatabasePath(status.serverDbPath)
+    }
+
+    if (syncReplica) {
+      replicateFromServer()
+    }
+  } else if (allowSwitch && status.replicaAvailable && status.activeDbPath && path.resolve(status.activeDbPath) !== path.resolve(status.replicaDbPath)) {
+    switchDatabasePath(status.replicaDbPath)
+  }
+
+  return getClientConnectionStatus()
+}
+
+function startReplicaSync(intervalMs = 5 * 60 * 1000) {
+  if (replicaInterval) clearInterval(replicaInterval)
+  syncClientConnectionState({ syncReplica: true, allowSwitch: true })
+  replicaInterval = setInterval(() => syncClientConnectionState({ syncReplica: true, allowSwitch: true }), intervalMs)
+}
+
+function isServerReachable() {
+  const status = getClientConnectionStatus()
+  return status.serverReachable !== null ? status.serverReachable : true
+}
+
 function getClientDbPath() {
-  // Essayer le serveur, sinon fallback sur la replica locale
-  const serverDb = path.join(setupConfig.dataPath, DB_FILENAME)
+  const serverDb = getConfiguredClientServerDbPath()
   try {
     if (fs.existsSync(serverDb)) return serverDb
   } catch { /* serveur inaccessible */ }
@@ -151,6 +214,32 @@ function getClientDbPath() {
     return replicaPath
   }
   throw new Error('Impossible de se connecter au serveur et aucune replica locale disponible.')
+}
+
+function promoteReplicaToServer() {
+  const replicaPath = getReplicaDbPath()
+  if (!fs.existsSync(replicaPath)) {
+    throw new Error('Aucune copie locale de secours n est disponible pour basculer ce poste en serveur.')
+  }
+
+  const localDataPath = getServerLocalDataPath()
+  const targetDb = path.join(localDataPath, DB_FILENAME)
+  ensureDirectory(localDataPath)
+
+  if (replicaInterval) {
+    clearInterval(replicaInterval)
+    replicaInterval = null
+  }
+
+  if (fs.existsSync(targetDb)) {
+    const backupName = `dentastock-before-promotion-${new Date().toISOString().replace(/[:.]/g, '-')}.db`
+    fs.copyFileSync(targetDb, path.join(localDataPath, backupName))
+  }
+
+  fs.copyFileSync(replicaPath, targetDb)
+  saveSetupConfig({ mode: 'server', dataPath: localDataPath })
+
+  return { localDataPath, targetDb }
 }
 
 // --- Sauvegarde mensuelle automatique ---
@@ -171,14 +260,109 @@ function setLastMonthlyBackupDate() {
   fs.writeFileSync(path.join(backupDir, 'last-monthly-backup.txt'), new Date().toISOString(), 'utf-8')
 }
 
-function runMonthlyBackupIfNeeded() {
-  if (!db || !dbPath) return
+function getLastWeeklyBackupDate() {
+  const metaPath = path.join(getBackupDir(), 'last-weekly-backup.txt')
+  if (!fs.existsSync(metaPath)) return null
+  const dateStr = fs.readFileSync(metaPath, 'utf-8').trim()
+  const d = new Date(dateStr)
+  return isNaN(d.getTime()) ? null : d
+}
+
+function setLastWeeklyBackupDate() {
+  const backupDir = ensureDirectory(getBackupDir())
+  fs.writeFileSync(path.join(backupDir, 'last-weekly-backup.txt'), new Date().toISOString(), 'utf-8')
+}
+
+function createBackupTimestamp(date = new Date()) {
+  return date.toISOString().replace(/[:.]/g, '-')
+}
+
+function getIsoWeekInfo(date = new Date()) {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = target.getUTCDay() || 7
+  target.setUTCDate(target.getUTCDate() + 4 - dayNum)
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1))
+  const weekNo = Math.ceil((((target - yearStart) / 86400000) + 1) / 7)
+  return { year: target.getUTCFullYear(), week: weekNo }
+}
+
+function cleanupOldBackupFiles(referenceDate = new Date()) {
+  const backupDir = getBackupDir()
+  if (!fs.existsSync(backupDir)) return
+
+  const oneYearAgo = new Date(referenceDate)
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+  const eightWeeksAgo = new Date(referenceDate)
+  eightWeeksAgo.setDate(eightWeeksAgo.getDate() - (8 * 7))
+
+  const ninetyDaysAgo = new Date(referenceDate)
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+
+  const backupFiles = fs.readdirSync(backupDir).filter(f => f.startsWith('dentastock-') && f.endsWith('.db.gz'))
+  for (const file of backupFiles) {
+    const filePath = path.join(backupDir, file)
+    const fileDate = fs.statSync(filePath).mtime
+    const isMonthly = file.startsWith('dentastock-monthly-')
+    const isWeekly = file.startsWith('dentastock-weekly-')
+    const isRestorePoint = file.startsWith('dentastock-before-')
+
+    if ((isMonthly && fileDate < oneYearAgo) || (isWeekly && fileDate < eightWeeksAgo) || (isRestorePoint && fileDate < ninetyDaysAgo)) {
+      fs.unlinkSync(filePath)
+      console.log(`[DentaStock] Ancien backup supprime: ${file}`)
+    }
+  }
+}
+
+function createCompressedBackup(backupName) {
+  const backupDir = ensureDirectory(getBackupDir())
+  const backupPath = path.join(backupDir, backupName)
+
+  saveDatabase()
+  const dbBuffer = fs.readFileSync(dbPath)
+  const compressed = zlib.gzipSync(dbBuffer, { level: 9 })
+  fs.writeFileSync(backupPath, compressed)
+
+  return { backupPath, compressedSize: compressed.length }
+}
+
+function runWeeklyBackupIfNeeded(force = false) {
+  if (!db || !dbPath) return null
+
+  const lastBackup = getLastWeeklyBackupDate()
+  const now = new Date()
+
+  if (!force && lastBackup) {
+    const daysSince = (now.getTime() - lastBackup.getTime()) / (1000 * 60 * 60 * 24)
+    if (daysSince < 7) return null
+  }
+
+  console.log('[DentaStock] Lancement de la sauvegarde hebdomadaire...')
+
+  try {
+    const isoWeek = getIsoWeekInfo(now)
+    const weekLabel = `${isoWeek.year}-W${String(isoWeek.week).padStart(2, '0')}`
+    const backupName = `dentastock-weekly-${weekLabel}.db.gz`
+    const { backupPath, compressedSize } = createCompressedBackup(backupName)
+
+    console.log(`[DentaStock] Backup hebdo cree: ${backupPath} (${(compressedSize / 1024).toFixed(0)} Ko)`)
+
+    cleanupOldBackupFiles(now)
+    setLastWeeklyBackupDate()
+    return backupPath
+  } catch (err) {
+    console.error('[DentaStock] Erreur sauvegarde hebdomadaire:', err.message)
+    return null
+  }
+}
+
+function runMonthlyBackupIfNeeded(force = false) {
+  if (!db || !dbPath) return null
 
   const lastBackup = getLastMonthlyBackupDate()
   const now = new Date()
 
-  // Verifier si > 30 jours depuis la derniere sauvegarde
-  if (lastBackup) {
+  if (!force && lastBackup) {
     const daysSince = (now.getTime() - lastBackup.getTime()) / (1000 * 60 * 60 * 24)
     if (daysSince < 30) return
   }
@@ -186,48 +370,28 @@ function runMonthlyBackupIfNeeded() {
   console.log('[DentaStock] Lancement de la sauvegarde mensuelle...')
 
   try {
-    // 1. Sauvegarder la base actuelle en fichier compresse
-    const backupDir = ensureDirectory(getBackupDir())
     const timestamp = now.toISOString().slice(0, 7) // YYYY-MM
-    const backupName = `dentastock-${timestamp}.db.gz`
-    const backupPath = path.join(backupDir, backupName)
+    const backupName = `dentastock-monthly-${timestamp}.db.gz`
+    const { backupPath, compressedSize } = createCompressedBackup(backupName)
 
-    saveDatabase()
-    const dbBuffer = fs.readFileSync(dbPath)
-    const compressed = zlib.gzipSync(dbBuffer, { level: 9 })
-    fs.writeFileSync(backupPath, compressed)
+    console.log(`[DentaStock] Backup cree: ${backupPath} (${(compressedSize / 1024).toFixed(0)} Ko)`)
 
-    console.log(`[DentaStock] Backup cree: ${backupPath} (${(compressed.length / 1024).toFixed(0)} Ko)`)
-
-    // 2. Supprimer les anciennes sauvegardes (> 1 an)
-    const oneYearAgo = new Date(now)
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
-
-    const backupFiles = fs.readdirSync(backupDir).filter(f => f.startsWith('dentastock-') && f.endsWith('.db.gz'))
-    for (const file of backupFiles) {
-      const match = file.match(/^dentastock-(\d{4}-\d{2})\.db\.gz$/)
-      if (match) {
-        const fileDate = new Date(match[1] + '-01')
-        if (fileDate < oneYearAgo) {
-          fs.unlinkSync(path.join(backupDir, file))
-          console.log(`[DentaStock] Ancien backup supprime: ${file}`)
-        }
-      }
-    }
-
-    // 3. Nettoyer les donnees > 1 an dans la base
-    const cutoffDate = oneYearAgo.toISOString().slice(0, 10)
-    cleanupOldData(cutoffDate)
-
-    // 4. VACUUM pour reduire la taille
-    db.run('VACUUM')
-    saveDatabase()
+    cleanupOldBackupFiles(now)
 
     setLastMonthlyBackupDate()
     console.log('[DentaStock] Sauvegarde mensuelle terminee.')
+    return backupPath
   } catch (err) {
     console.error('[DentaStock] Erreur sauvegarde mensuelle:', err.message)
+    return null
   }
+}
+
+function createAutomaticRestorePoint(prefix, date = new Date()) {
+  const backupName = `dentastock-before-${prefix}-${createBackupTimestamp(date)}.db.gz`
+  const backupPath = createCompressedBackup(backupName).backupPath
+  cleanupOldBackupFiles(date)
+  return backupPath
 }
 
 function cleanupOldData(cutoffDate) {
@@ -324,6 +488,10 @@ function saveDatabase() {
 function refreshDatabaseIfNeeded(force = false) {
   if (inWriteTransaction || !dbPath) return
 
+  if (setupConfig?.mode === 'client') {
+    syncClientConnectionState({ syncReplica: false, allowSwitch: true })
+  }
+
   const diskMtime = getDiskMtime()
   if (force || (diskMtime && diskMtime > dbFileMtime + 1)) {
     loadDatabaseFromFile(dbPath)
@@ -378,6 +546,13 @@ async function acquireWriteLock(targetPath = dbPath, timeoutMs = 10_000) {
 }
 
 async function withWriteTransaction(work) {
+  if (setupConfig?.mode === 'client') {
+    const connectionStatus = syncClientConnectionState({ syncReplica: false, allowSwitch: true })
+    if (connectionStatus.readOnly) {
+      throw new Error('Le serveur DentaStock est indisponible. Ce poste reste ouvert en lecture seule sur la copie locale de secours. Reconnectez le serveur ou reconfigurez ce poste en mode serveur.')
+    }
+  }
+
   const release = await acquireWriteLock()
 
   try {
@@ -1149,16 +1324,37 @@ safeHandle('setup:getConfig', () => {
   return setupConfig || null
 })
 
+safeHandle('setup:getDefaults', () => {
+  const serverDataPath = getServerLocalDataPath()
+  return {
+    installDir: getInstallDir(),
+    serverDataPath,
+    serverDbPath: path.join(serverDataPath, DB_FILENAME),
+  }
+})
+
 safeHandle('setup:configure', async (_, config) => {
-  const { mode, dataPath } = config
+  const { mode, dataPath, seedFromReplica } = config
 
   if (mode === 'server') {
-    // Mode serveur : base dans le dossier d'installation
-    const localDataPath = path.join(getInstallDir(), 'data')
-    ensureDirectory(localDataPath)
-    saveSetupConfig({ mode: 'server', dataPath: localDataPath })
-    await initDatabase(path.join(localDataPath, DB_FILENAME))
-    return { success: true, mode: 'server', dataPath: localDataPath }
+    let localDataPath = getServerLocalDataPath()
+    let targetDb = path.join(localDataPath, DB_FILENAME)
+
+    if (seedFromReplica) {
+      const promoted = promoteReplicaToServer()
+      localDataPath = promoted.localDataPath
+      targetDb = promoted.targetDb
+    } else {
+      ensureDirectory(localDataPath)
+      if (replicaInterval) {
+        clearInterval(replicaInterval)
+        replicaInterval = null
+      }
+      saveSetupConfig({ mode: 'server', dataPath: localDataPath })
+    }
+
+    await initDatabase(targetDb)
+    return { success: true, mode: 'server', dataPath: localDataPath, promotedFromReplica: Boolean(seedFromReplica) }
   }
 
   if (mode === 'client') {
@@ -1210,6 +1406,7 @@ safeHandle('setup:reset', async () => {
 safeHandle('backup:status', () => {
   const backupDir = getBackupDir()
   const lastBackup = getLastMonthlyBackupDate()
+  const lastWeeklyBackup = getLastWeeklyBackupDate()
   let backups = []
 
   if (fs.existsSync(backupDir)) {
@@ -1233,28 +1430,33 @@ safeHandle('backup:status', () => {
     }
   }
 
+  const connectionStatus = setupConfig?.mode === 'client'
+    ? getClientConnectionStatus()
+    : {
+        mode: setupConfig?.mode || null,
+        readOnly: false,
+        usingReplica: false,
+        replicaAvailable: fs.existsSync(getReplicaDbPath()),
+        activeDbPath: dbPath || null,
+      }
+
   return {
     lastMonthlyBackup: lastBackup ? lastBackup.toISOString() : null,
+    lastWeeklyBackup: lastWeeklyBackup ? lastWeeklyBackup.toISOString() : null,
     backups,
     backupDir,
     replica: replicaInfo,
     serverReachable: setupConfig?.mode === 'client' ? isServerReachable() : null,
+    connectionStatus,
   }
 })
 
 safeHandle('backup:runNow', async () => {
   if (!db) throw new Error('Aucune base ouverte.')
-  runMonthlyBackupIfNeeded()
-  // Forcer meme si pas encore 30 jours
-  const backupDir = ensureDirectory(getBackupDir())
-  const timestamp = new Date().toISOString().slice(0, 10)
+  cleanupOldBackupFiles(new Date())
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupName = `dentastock-manual-${timestamp}.db.gz`
-  const backupPath = path.join(backupDir, backupName)
-
-  saveDatabase()
-  const dbBuffer = fs.readFileSync(dbPath)
-  const compressed = zlib.gzipSync(dbBuffer, { level: 9 })
-  fs.writeFileSync(backupPath, compressed)
+  const { backupPath } = createCompressedBackup(backupName)
   return backupPath
 })
 
@@ -1279,8 +1481,9 @@ safeHandle('backup:restore', async (_, backupName) => {
   }
 
   // Backup de l'actuelle avant restauration
-  const safeCopy = `${dbPath}.before-restore.bak`
-  if (fs.existsSync(dbPath)) fs.copyFileSync(dbPath, safeCopy)
+  const safeCopy = fs.existsSync(dbPath)
+    ? createAutomaticRestorePoint('restore')
+    : null
 
   // Restaurer
   fs.writeFileSync(dbPath, decompressed)
@@ -1292,8 +1495,16 @@ safeHandle('backup:restore', async (_, backupName) => {
 })
 
 safeHandle('replica:syncNow', async () => {
-  const success = replicateFromServer()
-  return { success, serverReachable: isServerReachable() }
+  const status = syncClientConnectionState({ syncReplica: true, allowSwitch: true })
+  return { success: Boolean(status.serverReachable), serverReachable: status.serverReachable, usingReplica: status.usingReplica }
+})
+
+safeHandle('server:getStatus', () => {
+  return syncClientConnectionState({ syncReplica: false, allowSwitch: true })
+})
+
+safeHandle('server:retryConnection', () => {
+  return syncClientConnectionState({ syncReplica: true, allowSwitch: true })
 })
 
 // Fournisseurs
@@ -2401,10 +2612,9 @@ safeHandle('db:import', async () => {
   }
 
   // Sauvegarder l'ancienne DB avant ecrasement
-  const backupPath = `${dbPath}.before-import.bak`
-  if (fs.existsSync(dbPath)) {
-    fs.copyFileSync(dbPath, backupPath)
-  }
+  const backupPath = fs.existsSync(dbPath)
+    ? createAutomaticRestorePoint('import')
+    : null
 
   // Remplacer la DB
   fs.copyFileSync(importPath, dbPath)
@@ -2604,7 +2814,9 @@ safeHandle('prix:historique', (_, produitId) => {
 
 // --- Recherche globale ---
 safeHandle('search:global', (_, query) => {
-  if (!query || query.trim().length < 2) return { produits: [], fournisseurs: [], commandes: [] }
+  if (!query || query.trim().length < 2) {
+    return { produits: [], fournisseurs: [], praticiens: [], commandes: [] }
+  }
   const q = `%${query.trim()}%`
 
   const produits = dbAll(`SELECT id, reference, nom, categorie, stock_actuel, stock_minimum, unite
@@ -2615,12 +2827,16 @@ safeHandle('search:global', (_, query) => {
     FROM fournisseurs WHERE archived = 0 AND (nom LIKE ? OR contact_commercial LIKE ? OR email LIKE ?)
     ORDER BY nom LIMIT 5`, [q, q, q])
 
+  const praticiens = dbAll(`SELECT id, nom, prenom, role
+    FROM praticiens WHERE archived = 0 AND (nom LIKE ? OR prenom LIKE ? OR role LIKE ?)
+    ORDER BY nom, prenom LIMIT 5`, [q, q, q])
+
   const commandes = dbAll(`SELECT c.id, c.reference_commande, c.date_commande, c.statut, f.nom as fournisseur_nom
     FROM commandes c LEFT JOIN fournisseurs f ON f.id = c.fournisseur_id
     WHERE c.reference_commande LIKE ? OR f.nom LIKE ?
     ORDER BY c.date_commande DESC LIMIT 5`, [q, q])
 
-  return { produits, fournisseurs, commandes }
+  return { produits, fournisseurs, praticiens, commandes }
 })
 
 // Analyse de consommation - recommandation de seuils
@@ -2797,8 +3013,11 @@ app.whenReady().then(async () => {
 
     // Sauvegarde mensuelle automatique (serveur uniquement)
     if (setupConfig.mode === 'server') {
-      try { runMonthlyBackupIfNeeded() } catch (err) {
-        console.error('[DentaStock] Erreur backup mensuel:', err.message)
+      try {
+        runWeeklyBackupIfNeeded()
+        runMonthlyBackupIfNeeded()
+      } catch (err) {
+        console.error('[DentaStock] Erreur backups auto:', err.message)
       }
     }
   } else {
@@ -2806,12 +3025,15 @@ app.whenReady().then(async () => {
     const defaultDb = getDefaultDbPath()
     if (fs.existsSync(defaultDb) && fs.statSync(defaultDb).size > 0) {
       // Ancienne install, migrer vers mode serveur automatiquement
-      const localDataPath = path.join(getInstallDir(), 'data')
+      const localDataPath = getServerLocalDataPath()
       saveSetupConfig({ mode: 'server', dataPath: localDataPath })
       try {
         await initDatabase(defaultDb)
-        try { runMonthlyBackupIfNeeded() } catch (err) {
-          console.error('[DentaStock] Erreur backup mensuel:', err.message)
+        try {
+          runWeeklyBackupIfNeeded()
+          runMonthlyBackupIfNeeded()
+        } catch (err) {
+          console.error('[DentaStock] Erreur backups auto:', err.message)
         }
       } catch (error) {
         dialog.showErrorBox('Erreur base de donnees', `Impossible d'ouvrir la base de donnees : ${error.message}`)
