@@ -79,7 +79,7 @@ def header_footer(canvas_obj, doc):
     canvas_obj.line(2*cm, A4[1] - 1.5*cm, A4[0] - 2*cm, A4[1] - 1.5*cm)
     canvas_obj.setFont('Helvetica', 8)
     canvas_obj.setFillColor(SLATE_400)
-    canvas_obj.drawCentredString(A4[0]/2, 1.2*cm, f"DentaStock v2.4.0 - Presentation du logiciel - Page {doc.page}")
+    canvas_obj.drawCentredString(A4[0]/2, 1.2*cm, f"DentaStock v2.5.0 - Presentation du logiciel - Page {doc.page}")
     canvas_obj.restoreState()
 
 def first_page(canvas_obj, doc):
@@ -167,9 +167,11 @@ def build():
         "6. Consommation et tracabilite",
         "7. Statistiques et indicateurs",
         "8. Fournisseurs et remises",
-        "9. Fonctionnalites avancees",
-        "10. Architecture technique",
-        "11. Securite et sauvegarde",
+        "9. Profils, operateurs et securite",
+        "10. Journal d'audit",
+        "11. Fonctionnalites avancees",
+        "12. Architecture technique",
+        "13. Securite et sauvegarde",
     ]
     for item in toc_items:
         story.append(Paragraph(item, ParagraphStyle(
@@ -455,8 +457,76 @@ def build():
 
     story.append(PageBreak())
 
+    # ---- PAGE: Profils et operateurs ----
+    story.append(Paragraph("9. Profils, operateurs et securite", H1_STYLE))
+    story.append(Spacer(1, 0.2*cm))
+
+    story.append(Paragraph(
+        "DentaStock integre un systeme de <b>gestion des operateurs</b> avec controle d'acces "
+        "par role et permissions granulaires. Chaque utilisateur dispose d'un profil avec "
+        "un code PIN pour s'authentifier.",
+        BODY_STYLE
+    ))
+
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Roles et permissions", H2_STYLE))
+
+    roles_data = [
+        [Paragraph("<b>Role</b>", BODY_STYLE), Paragraph("<b>Description</b>", BODY_STYLE), Paragraph("<b>Acces</b>", BODY_STYLE)],
+        [Paragraph("Administrateur", BODY_STYLE), Paragraph("Responsable du cabinet", BODY_STYLE), Paragraph("Toutes les permissions", BODY_STYLE)],
+        [Paragraph("Equipe", BODY_STYLE), Paragraph("Assistant(e), praticien", BODY_STYLE), Paragraph("Commandes, receptions, stock, consommation", BODY_STYLE)],
+        [Paragraph("Lecture seule", BODY_STYLE), Paragraph("Consultation uniquement", BODY_STYLE), Paragraph("Aucune modification possible", BODY_STYLE)],
+    ]
+    rt = Table(roles_data, colWidths=[3.5*cm, 5*cm, 7*cm])
+    rt.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), VIOLET),
+        ('TEXTCOLOR', (0,0), (-1,0), white),
+        ('BACKGROUND', (0,1), (-1,-1), SLATE_100),
+        ('GRID', (0,0), (-1,-1), 0.5, SLATE_400),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 8),
+    ]))
+    story.append(rt)
+
+    story.append(Spacer(1, 0.3*cm))
+    story.append(make_feature_table([
+        "<b>10 permissions granulaires</b> - Commandes, receptions, stock, fournisseurs, produits, praticiens, utilisateurs, parametres, sauvegardes",
+        "<b>Authentification par PIN</b> - Code a 4 chiffres, stocke en hash SHA-256",
+        "<b>Session operateur</b> - Identification de l'utilisateur connecte dans le header",
+        "<b>Gestion depuis les Parametres</b> - Creation, modification, desactivation des profils",
+    ], VIOLET))
+
+    story.extend(screenshot('parametres', "Page Parametres avec gestion des profils operateurs"))
+
+    story.append(PageBreak())
+
+    # ---- PAGE: Journal d'audit ----
+    story.append(Paragraph("10. Journal d'audit", H1_STYLE))
+    story.append(Spacer(1, 0.2*cm))
+
+    story.append(Paragraph(
+        "Le <b>journal d'audit</b> enregistre automatiquement toutes les actions effectuees "
+        "dans l'application : creation, modification, suppression de donnees, connexions, "
+        "sauvegardes et restaurations. Chaque entree indique l'operateur, la date, le module "
+        "concerne et le detail de l'action.",
+        BODY_STYLE
+    ))
+
+    story.extend(screenshot('journal', "Journal d'audit avec filtrage par module et operateur"))
+
+    story.append(make_feature_table([
+        "<b>Tracabilite complete</b> - Toutes les actions sont horodatees et attribuees",
+        "<b>Filtrage par module</b> - Produits, commandes, receptions, fournisseurs, parametres...",
+        "<b>Filtrage par operateur</b> - Identifier qui a fait quoi",
+        "<b>Historique consultable</b> - Recherche et pagination des evenements",
+    ], TEAL))
+
+    story.append(PageBreak())
+
     # ---- PAGE: Fonctionnalites avancees ----
-    story.append(Paragraph("9. Fonctionnalites avancees", H1_STYLE))
+    story.append(Paragraph("11. Fonctionnalites avancees", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
     story.append(Paragraph("Export CSV", H2_STYLE))
@@ -509,12 +579,10 @@ def build():
         BODY_STYLE
     ))
 
-    story.extend(screenshot('parametres', "Page Parametres : partage reseau, sauvegarde, restauration"))
-
     story.append(PageBreak())
 
     # ---- PAGE: Architecture technique ----
-    story.append(Paragraph("10. Architecture technique", H1_STYLE))
+    story.append(Paragraph("12. Architecture technique", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
     tech_data = [
@@ -553,7 +621,7 @@ def build():
     story.append(PageBreak())
 
     # ---- PAGE: Securite ----
-    story.append(Paragraph("11. Securite et sauvegarde", H1_STYLE))
+    story.append(Paragraph("13. Securite et sauvegarde", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
     story.append(Paragraph("Strategie de sauvegarde", H2_STYLE))

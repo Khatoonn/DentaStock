@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
+const crypto = require('crypto')
 const zlib = require('zlib')
 const dbHelpers = require('./db')
 const statsHandlers = require('./handlers-stats')
@@ -31,6 +33,26 @@ let dbConfigFile = ''
 let inWriteTransaction = false
 let storageConfigFile = ''
 let setupConfig = null
+
+const VALID_PROFILE_ROLES = ['ADMIN', 'EQUIPE', 'LECTURE']
+const VALID_OPERATOR_STATUS = ['ACTIF', 'INACTIF']
+const OPERATOR_PERMISSION_KEYS = [
+  'commandes_generate',
+  'commandes_edit',
+  'receptions_edit',
+  'stock_edit',
+  'fournisseurs_edit',
+  'produits_edit',
+  'praticiens_edit',
+  'utilisateurs_edit',
+  'parametres_edit',
+  'sauvegardes_edit',
+]
+
+let currentSession = {
+  operatorId: null,
+  loginAt: null,
+}
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -414,6 +436,304 @@ function writeLastIntegrityCheck(payload) {
   fs.writeFileSync(path.join(backupDir, 'last-integrity-check.json'), JSON.stringify(payload, null, 2), 'utf-8')
 }
 
+function normalizeProfileRole(role) {
+  const normalized = String(role || 'EQUIPE').trim().toUpperCase()
+  return VALID_PROFILE_ROLES.includes(normalized) ? normalized : 'EQUIPE'
+}
+
+function normalizeOperatorStatus(status) {
+  const normalized = String(status || 'ACTIF').trim().toUpperCase()
+  return VALID_OPERATOR_STATUS.includes(normalized) ? normalized : 'ACTIF'
+}
+
+function normalizeReferenceCode(value, fallback = '') {
+  const digits = String(value ?? fallback).replace(/\D/g, '')
+  if (!digits) return ''
+  return String(Number(digits))
+}
+
+function createPinHash(pin) {
+  return crypto.createHash('sha256').update(`dentastock-pin:${String(pin || '')}`).digest('hex')
+}
+
+function normalizePin(pin) {
+  const digits = String(pin || '').replace(/\D/g, '')
+  return digits.length === 4 ? digits : ''
+}
+
+function verifyPin(pin, hash) {
+  const normalizedPin = normalizePin(pin)
+  if (!normalizedPin || !hash) return false
+  return createPinHash(normalizedPin) === hash
+}
+
+function defaultPermissionsForRole(role = 'EQUIPE') {
+  const normalizedRole = normalizeProfileRole(role)
+  if (normalizedRole === 'ADMIN') {
+    return Object.fromEntries(OPERATOR_PERMISSION_KEYS.map(key => [key, true]))
+  }
+  if (normalizedRole === 'LECTURE') {
+    return Object.fromEntries(OPERATOR_PERMISSION_KEYS.map(key => [key, false]))
+  }
+
+  return {
+    commandes_generate: true,
+    commandes_edit: true,
+    receptions_edit: true,
+    stock_edit: true,
+    fournisseurs_edit: false,
+    produits_edit: false,
+    praticiens_edit: false,
+    utilisateurs_edit: false,
+    parametres_edit: false,
+    sauvegardes_edit: false,
+  }
+}
+
+function normalizePermissions(input, role = 'EQUIPE') {
+  const defaults = defaultPermissionsForRole(role)
+  const source = input && typeof input === 'object' ? input : {}
+  return OPERATOR_PERMISSION_KEYS.reduce((accumulator, key) => {
+    accumulator[key] = source[key] === undefined ? Boolean(defaults[key]) : Boolean(source[key])
+    return accumulator
+  }, {})
+}
+
+function parsePermissions(rawPermissions, role = 'EQUIPE') {
+  if (!rawPermissions) return defaultPermissionsForRole(role)
+
+  try {
+    return normalizePermissions(JSON.parse(rawPermissions), role)
+  } catch {
+    return defaultPermissionsForRole(role)
+  }
+}
+
+function serializePermissions(permissions, role = 'EQUIPE') {
+  return JSON.stringify(normalizePermissions(permissions, role))
+}
+
+function sanitizeOperatorRow(row = null) {
+  if (!row) return null
+
+  const nom = String(row.nom || '').trim()
+  const prenom = String(row.prenom || '').trim()
+  return {
+    id: Number(row.id || 0),
+    nom,
+    prenom,
+    nom_complet: `${prenom ? `${prenom} ` : ''}${nom}`.trim(),
+    reference_code: normalizeReferenceCode(row.reference_code, row.id),
+    role: normalizeProfileRole(row.role),
+    statut: normalizeOperatorStatus(row.statut),
+    permissions: parsePermissions(row.permissions, row.role),
+    hasPin: Boolean(row.pin_hash),
+    last_login_at: row.last_login_at || null,
+    created_at: row.created_at || null,
+  }
+}
+
+function ensureDefaultProfiles() {
+  const total = Number(dbGet('SELECT COUNT(*) AS c FROM profils')?.c || 0)
+
+  if (total === 0) {
+    dbRun(`INSERT INTO profils (
+      nom, prenom, reference_code, role, actif, statut, permissions, pin_hash
+    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)`, [
+      'Administrateur',
+      '',
+      '1',
+      'ADMIN',
+      'ACTIF',
+      serializePermissions(defaultPermissionsForRole('ADMIN'), 'ADMIN'),
+      createPinHash('1111'),
+    ])
+    return
+  }
+
+  const rows = dbAll('SELECT * FROM profils ORDER BY id ASC')
+  const usedReferenceCodes = new Set()
+
+  rows.forEach((row, index) => {
+    const nextRole = normalizeProfileRole(row.role)
+    const nextReferenceCode = normalizeReferenceCode(row.reference_code, row.id || index + 1)
+    let uniqueReferenceCode = nextReferenceCode || String(index + 1)
+    while (usedReferenceCodes.has(uniqueReferenceCode)) {
+      uniqueReferenceCode = String(Number(uniqueReferenceCode) + 1)
+    }
+    usedReferenceCodes.add(uniqueReferenceCode)
+
+    const updates = []
+    const params = []
+
+    if ((row.prenom || null) === null) {
+      updates.push('prenom = ?')
+      params.push('')
+    }
+    if ((row.reference_code || '') !== uniqueReferenceCode) {
+      updates.push('reference_code = ?')
+      params.push(uniqueReferenceCode)
+    }
+    if (normalizeOperatorStatus(row.statut) !== String(row.statut || '').trim().toUpperCase()) {
+      updates.push('statut = ?')
+      params.push(normalizeOperatorStatus(row.statut))
+    }
+    if (!row.permissions) {
+      updates.push('permissions = ?')
+      params.push(serializePermissions(defaultPermissionsForRole(nextRole), nextRole))
+    }
+    if (!row.pin_hash) {
+      updates.push('pin_hash = ?')
+      params.push(createPinHash('1111'))
+    }
+    if ((row.role || '') !== nextRole) {
+      updates.push('role = ?')
+      params.push(nextRole)
+    }
+
+    if (updates.length > 0) {
+      params.push(row.id)
+      dbRun(`UPDATE profils SET ${updates.join(', ')} WHERE id = ?`, params)
+    }
+  })
+}
+
+function applyInitialAdministratorPin(pin) {
+  const normalizedPin = normalizePin(pin)
+  if (!normalizedPin) {
+    throw new Error('Le code PIN administrateur doit contenir exactement 4 chiffres.')
+  }
+
+  ensureDefaultProfiles()
+
+  const administrator = dbGet(`SELECT * FROM profils
+    WHERE role = 'ADMIN'
+    ORDER BY CAST(COALESCE(reference_code, id) AS INTEGER) ASC, id ASC
+    LIMIT 1`)
+
+  if (!administrator) {
+    throw new Error('Impossible d initialiser le compte administrateur.')
+  }
+
+  dbRun(`UPDATE profils
+    SET reference_code = ?,
+        role = 'ADMIN',
+        statut = 'ACTIF',
+        permissions = ?,
+        pin_hash = ?
+    WHERE id = ?`, [
+    normalizeReferenceCode(administrator.reference_code, 1) || '1',
+    serializePermissions(defaultPermissionsForRole('ADMIN'), 'ADMIN'),
+    createPinHash(normalizedPin),
+    administrator.id,
+  ])
+
+  saveDatabase()
+  return sanitizeOperatorRow(dbGet('SELECT * FROM profils WHERE id = ?', [administrator.id]))
+}
+
+function getOperatorById(operatorId) {
+  if (!operatorId) return null
+  return dbGet('SELECT * FROM profils WHERE id = ?', [operatorId]) || null
+}
+
+function getCurrentOperatorRow() {
+  ensureDefaultProfiles()
+  if (!currentSession.operatorId) return null
+  const row = getOperatorById(currentSession.operatorId)
+  if (!row || normalizeOperatorStatus(row.statut) !== 'ACTIF') return null
+  return row
+}
+
+function getActiveProfileRow() {
+  return getCurrentOperatorRow()
+}
+
+function requireAuthenticatedOperator(permission = null) {
+  const operator = getCurrentOperatorRow()
+  if (!operator) {
+    throw new Error('Aucun operateur connecte. Connectez-vous avec votre numero de reference et votre code PIN.')
+  }
+
+  if (normalizeOperatorStatus(operator.statut) !== 'ACTIF') {
+    throw new Error('Cet operateur est inactif et ne peut pas utiliser DentaStock.')
+  }
+
+  if (permission) {
+    const permissions = parsePermissions(operator.permissions, operator.role)
+    if (!permissions[permission]) {
+      throw new Error('Vous n avez pas le droit operateur necessaire pour cette action.')
+    }
+  }
+
+  return operator
+}
+
+function getSessionStatus() {
+  const operator = sanitizeOperatorRow(getCurrentOperatorRow())
+  return {
+    authenticated: Boolean(operator),
+    workstation: os.hostname(),
+    loginAt: currentSession.loginAt,
+    operator,
+  }
+}
+
+function getAuditActor() {
+  const activeProfile = getCurrentOperatorRow()
+  return {
+    actorProfileId: activeProfile?.id || null,
+    actorName: activeProfile ? `${activeProfile.prenom ? `${activeProfile.prenom} ` : ''}${activeProfile.nom}`.trim() : 'Systeme',
+    actorRole: activeProfile?.role || 'SYSTEM',
+    workstation: os.hostname(),
+  }
+}
+
+function canPersistOperatorSession() {
+  if (setupConfig?.mode !== 'client') return true
+  const connectionStatus = getClientConnectionStatus()
+  return !connectionStatus.readOnly
+}
+
+function stringifyAuditDetails(details) {
+  if (!details) return null
+  if (typeof details === 'string') return details
+
+  try {
+    return JSON.stringify(details)
+  } catch {
+    return String(details)
+  }
+}
+
+function logAuditEntry({
+  action,
+  module,
+  targetType = null,
+  targetId = null,
+  targetLabel = null,
+  summary,
+  details = null,
+}) {
+  const actor = getAuditActor()
+  dbRun(`INSERT INTO audit_log (
+    action, module, target_type, target_id, target_label, summary, details,
+    actor_profile_id, actor_name, actor_role, workstation
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+    action,
+    module,
+    targetType,
+    targetId,
+    targetLabel,
+    summary,
+    stringifyAuditDetails(details),
+    actor.actorProfileId,
+    actor.actorName,
+    actor.actorRole,
+    actor.workstation,
+  ])
+}
+
 function listBackupFiles() {
   const backupDir = getBackupDir()
   if (!fs.existsSync(backupDir)) return []
@@ -648,11 +968,22 @@ async function acquireWriteLock(targetPath = dbPath, timeoutMs = 10_000) {
   throw new Error('La base de donnees est deja utilisee par un autre poste. Reessayez dans quelques secondes.')
 }
 
-async function withWriteTransaction(work) {
+async function withWriteTransaction(work, options = {}) {
   if (setupConfig?.mode === 'client') {
     const connectionStatus = syncClientConnectionState({ syncReplica: false, allowSwitch: true })
     if (connectionStatus.readOnly) {
       throw new Error('Le serveur DentaStock est indisponible. Ce poste reste ouvert en lecture seule sur la copie locale de secours. Reconnectez le serveur ou reconfigurez ce poste en mode serveur.')
+    }
+  }
+
+  if (!options.skipSession) {
+    requireAuthenticatedOperator(options.permission || null)
+  }
+
+  if (!options.skipRoleCheck) {
+    const activeProfile = getCurrentOperatorRow()
+    if (activeProfile?.role === 'LECTURE') {
+      throw new Error('Cet operateur est en lecture seule. Connectez-vous avec un operateur equipe ou administrateur pour modifier les donnees.')
     }
   }
 
@@ -824,6 +1155,7 @@ function tableHasColumn(tableName, columnName) {
     'fournisseurs', 'produits', 'praticiens', 'receptions', 'reception_items',
     'reception_passages', 'commandes', 'commande_items', 'utilisations',
     'utilisation_items', 'documents', 'soins_templates', 'categories', 'config',
+    'profils', 'audit_log',
   ]
   if (!validTables.includes(tableName)) return false
 
@@ -902,6 +1234,119 @@ function buildQuantityMap(items = []) {
   })
 
   return quantities
+}
+
+function getCommandeAdvisorRows() {
+  const produits = dbAll(`SELECT p.*, f.nom AS fournisseur_nom
+    FROM produits p
+    LEFT JOIN fournisseurs f ON f.id = p.fournisseur_id
+    WHERE p.archived = 0
+    ORDER BY p.nom`)
+
+  const pendingRows = dbAll(`
+    SELECT ci.produit_id,
+      SUM(MAX(ci.quantite - COALESCE(rec.recu, 0), 0)) AS quantite_en_attente
+    FROM commande_items ci
+    JOIN commandes c ON c.id = ci.commande_id
+    LEFT JOIN (
+      SELECT r.commande_id, ri.produit_id, SUM(ri.quantite) AS recu
+      FROM reception_items ri
+      JOIN receptions r ON r.id = ri.reception_id
+      GROUP BY r.commande_id, ri.produit_id
+    ) rec ON rec.commande_id = ci.commande_id AND rec.produit_id = ci.produit_id
+    WHERE c.statut IN ('EN_ATTENTE', 'PARTIELLE')
+    GROUP BY ci.produit_id
+  `)
+
+  const consumptionRows = dbAll(`
+    SELECT ui.produit_id,
+      SUM(ui.quantite) AS total_consomme,
+      COUNT(DISTINCT substr(u.date, 1, 7)) AS nb_mois
+    FROM utilisation_items ui
+    JOIN utilisations u ON u.id = ui.utilisation_id
+    WHERE u.date >= date('now', '-90 days')
+    GROUP BY ui.produit_id
+  `)
+
+  const lastPriceRows = dbAll(`
+    SELECT ph.produit_id, ph.prix_unitaire, ph.date
+    FROM prix_historique ph
+    JOIN (
+      SELECT produit_id, MAX(id) AS max_id
+      FROM prix_historique
+      GROUP BY produit_id
+    ) latest ON latest.max_id = ph.id
+  `)
+
+  const leadTimeRows = dbAll(`
+    SELECT c.fournisseur_id, AVG(julianday(r.date) - julianday(c.date_commande)) AS avg_delai
+    FROM commandes c
+    JOIN receptions r ON r.commande_id = c.id
+    WHERE c.fournisseur_id IS NOT NULL
+      AND c.date_commande IS NOT NULL
+      AND r.date >= date('now', '-6 months')
+    GROUP BY c.fournisseur_id
+  `)
+
+  const pendingMap = new Map(pendingRows.map(row => [Number(row.produit_id || 0), Number(row.quantite_en_attente || 0)]))
+  const consumptionMap = new Map(consumptionRows.map(row => [Number(row.produit_id || 0), row]))
+  const lastPriceMap = new Map(lastPriceRows.map(row => [Number(row.produit_id || 0), row]))
+  const leadTimeMap = new Map(leadTimeRows.map(row => [Number(row.fournisseur_id || 0), Number(row.avg_delai || 14)]))
+
+  return produits
+    .map(produit => {
+      const produitId = Number(produit.id || 0)
+      const stockActuel = Number(produit.stock_actuel || 0)
+      const stockMinimum = Number(produit.stock_minimum || 0)
+      const quantiteEnAttente = Number(pendingMap.get(produitId) || 0)
+      const consumption = consumptionMap.get(produitId)
+      const nbMois = Math.max(Number(consumption?.nb_mois || 0), 1)
+      const moyenneMensuelle = consumption ? Number(consumption.total_consomme || 0) / nbMois : 0
+      const delaiLivraisonJours = Math.max(7, Math.round(Number(leadTimeMap.get(Number(produit.fournisseur_id || 0)) || 14)))
+      const couvertureSecurite = moyenneMensuelle > 0 ? Math.ceil((moyenneMensuelle / 30) * delaiLivraisonJours) : 0
+      const stockCible = Math.max(
+        stockMinimum > 0 ? stockMinimum * 2 : 0,
+        stockMinimum + couvertureSecurite,
+        stockMinimum > 0 ? stockMinimum + 1 : 1
+      )
+      const quantiteMinimum = Math.max(0, Math.ceil(stockMinimum - stockActuel - quantiteEnAttente))
+      const quantiteConseillee = Math.max(0, Math.ceil(stockCible - stockActuel - quantiteEnAttente))
+      const quantiteACommander = Math.max(quantiteMinimum, quantiteConseillee)
+      const couvertureJours = moyenneMensuelle > 0
+        ? Math.floor((stockActuel + quantiteEnAttente) / (moyenneMensuelle / 30))
+        : null
+      const lastPrice = lastPriceMap.get(produitId)
+      const prixDernier = Number(lastPrice?.prix_unitaire || 0)
+      const prixReference = Number(produit.prix_unitaire || 0) || prixDernier
+      const variationPrixPct = prixDernier > 0 && prixReference > 0
+        ? Math.round(((prixReference - prixDernier) / prixDernier) * 100)
+        : null
+
+      return {
+        ...produit,
+        quantite_en_attente: quantiteEnAttente,
+        quantite_minimum: quantiteMinimum,
+        quantite_conseillee: quantiteConseillee,
+        quantite_a_commander: quantiteACommander,
+        moyenne_mensuelle: Math.round(moyenneMensuelle * 10) / 10,
+        couverture_jours: Number.isFinite(couvertureJours) ? couvertureJours : null,
+        delai_livraison_jours: delaiLivraisonJours,
+        prix_dernier: prixDernier || null,
+        prix_reference: prixReference || 0,
+        variation_prix_pct: variationPrixPct,
+        montant_estime: quantiteACommander * prixReference,
+      }
+    })
+    .filter(produit => produit.quantite_a_commander > 0)
+    .sort((left, right) => {
+      const leftGap = (Number(left.stock_actuel || 0) + Number(left.quantite_en_attente || 0)) - Number(left.stock_minimum || 0)
+      const rightGap = (Number(right.stock_actuel || 0) + Number(right.quantite_en_attente || 0)) - Number(right.stock_minimum || 0)
+      if (leftGap !== rightGap) return leftGap - rightGap
+
+      const leftCover = Number.isFinite(left.couverture_jours) ? left.couverture_jours : 9999
+      const rightCover = Number.isFinite(right.couverture_jours) ? right.couverture_jours : 9999
+      return leftCover - rightCover
+    })
 }
 
 function insertReceptionPassage(receptionId, data = {}) {
@@ -1221,6 +1666,20 @@ function ensureSchema() {
     valeur TEXT
   )`)
 
+  db.run(`CREATE TABLE IF NOT EXISTS profils (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom TEXT NOT NULL,
+    prenom TEXT DEFAULT '',
+    reference_code TEXT,
+    role TEXT NOT NULL DEFAULT 'EQUIPE',
+    actif INTEGER NOT NULL DEFAULT 0,
+    statut TEXT NOT NULL DEFAULT 'ACTIF',
+    permissions TEXT,
+    pin_hash TEXT,
+    last_login_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`)
+
   db.run(`CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nom TEXT NOT NULL UNIQUE,
@@ -1228,8 +1687,30 @@ function ensureSchema() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`)
 
+  db.run(`CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    module TEXT NOT NULL,
+    target_type TEXT,
+    target_id INTEGER,
+    target_label TEXT,
+    summary TEXT NOT NULL,
+    details TEXT,
+    actor_profile_id INTEGER REFERENCES profils(id),
+    actor_name TEXT,
+    actor_role TEXT,
+    workstation TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`)
+
   ensureColumn('fournisseurs', 'contact_commercial', 'TEXT')
   ensureColumn('receptions', 'commande_id', 'INTEGER')
+  ensureColumn('profils', 'prenom', "TEXT DEFAULT ''")
+  ensureColumn('profils', 'reference_code', 'TEXT')
+  ensureColumn('profils', 'statut', "TEXT DEFAULT 'ACTIF'")
+  ensureColumn('profils', 'permissions', 'TEXT')
+  ensureColumn('profils', 'pin_hash', 'TEXT')
+  ensureColumn('profils', 'last_login_at', 'DATETIME')
 
   // Colonnes d'archivage
   ensureColumn('produits', 'archived', 'INTEGER DEFAULT 0')
@@ -1285,6 +1766,11 @@ function ensureSchema() {
   db.run('CREATE INDEX IF NOT EXISTS idx_documents_fournisseur ON documents(fournisseur_id)')
   db.run('CREATE INDEX IF NOT EXISTS idx_documents_reception ON documents(reception_id)')
   db.run('CREATE INDEX IF NOT EXISTS idx_documents_date ON documents(date)')
+  db.run('CREATE INDEX IF NOT EXISTS idx_profils_actif ON profils(actif)')
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_profils_reference_code ON profils(reference_code)')
+  db.run('CREATE INDEX IF NOT EXISTS idx_profils_statut ON profils(statut)')
+  db.run('CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)')
+  db.run('CREATE INDEX IF NOT EXISTS idx_audit_log_module ON audit_log(module)')
 
   // Retours fournisseur
   db.run(`CREATE TABLE IF NOT EXISTS retours (
@@ -1305,6 +1791,7 @@ function ensureSchema() {
   db.run('CREATE INDEX IF NOT EXISTS idx_retour_items_retour ON retour_items(retour_id)')
   db.run('CREATE INDEX IF NOT EXISTS idx_retour_items_produit ON retour_items(produit_id)')
 
+  ensureDefaultProfiles()
   syncCategoriesCatalog()
 }
 
@@ -1400,13 +1887,283 @@ safeHandle('config:get', (_, cle) => {
 safeHandle('config:set', async (_, cle, valeur) => {
   await withWriteTransaction(() => {
     dbRun('INSERT OR REPLACE INTO config (cle, valeur) VALUES (?, ?)', [cle, valeur])
-  })
+  }, { permission: 'parametres_edit' })
+})
+
+// Profils
+safeHandle('profiles:list', () => {
+  ensureDefaultProfiles()
+  return dbAll(`SELECT * FROM profils
+    ORDER BY CAST(COALESCE(reference_code, id) AS INTEGER) ASC, nom COLLATE NOCASE ASC, prenom COLLATE NOCASE ASC`)
+    .map(row => sanitizeOperatorRow(row))
+})
+
+safeHandle('profiles:getActive', () => {
+  return sanitizeOperatorRow(getCurrentOperatorRow())
+})
+
+safeHandle('profiles:add', async (_, data) => {
+  return withWriteTransaction(() => {
+    const nom = String(data?.nom || '').trim()
+    if (!nom) throw new Error('Le nom de l operateur est obligatoire.')
+
+    const prenom = String(data?.prenom || '').trim()
+    const role = normalizeProfileRole(data?.role)
+    const statut = normalizeOperatorStatus(data?.statut)
+    const referenceCode = normalizeReferenceCode(data?.reference_code)
+    const pin = normalizePin(data?.pin)
+
+    if (!referenceCode) throw new Error('Le numero de reference est obligatoire.')
+    if (!pin) throw new Error('Le code PIN doit contenir exactement 4 chiffres.')
+
+    const duplicate = dbGet('SELECT id FROM profils WHERE reference_code = ?', [referenceCode])
+    if (duplicate) throw new Error('Ce numero de reference est deja utilise.')
+
+    const permissions = normalizePermissions(data?.permissions, role)
+
+    const profileId = dbInsert(`INSERT INTO profils (
+      nom, prenom, reference_code, role, actif, statut, permissions, pin_hash
+    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)`, [
+      nom,
+      prenom,
+      referenceCode,
+      role,
+      statut,
+      serializePermissions(permissions, role),
+      createPinHash(pin),
+    ])
+
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'OPERATEURS',
+      targetType: 'operateur',
+      targetId: profileId,
+      targetLabel: `${prenom ? `${prenom} ` : ''}${nom}`.trim(),
+      summary: `Operateur "${prenom ? `${prenom} ` : ''}${nom}" ajoute.`,
+      details: `Ref ${referenceCode} - role ${role} - statut ${statut}.`,
+    })
+    return profileId
+  }, { permission: 'utilisateurs_edit' })
+})
+
+safeHandle('profiles:update', async (_, id, data) => {
+  await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM profils WHERE id = ?', [id])
+    if (!current) throw new Error('Operateur introuvable.')
+
+    const nom = String(data?.nom || '').trim()
+    const prenom = String(data?.prenom || '').trim()
+    if (!nom) throw new Error('Le nom de l operateur est obligatoire.')
+
+    const role = normalizeProfileRole(data?.role)
+    const statut = normalizeOperatorStatus(data?.statut)
+    const referenceCode = normalizeReferenceCode(data?.reference_code, current.reference_code || current.id)
+    if (!referenceCode) throw new Error('Le numero de reference est obligatoire.')
+
+    const duplicate = dbGet('SELECT id FROM profils WHERE reference_code = ? AND id <> ?', [referenceCode, id])
+    if (duplicate) throw new Error('Ce numero de reference est deja utilise.')
+
+    const permissions = normalizePermissions(data?.permissions, role)
+    const nextPinHash = data?.pin ? createPinHash(normalizePin(data.pin)) : current.pin_hash
+    if (data?.pin && !normalizePin(data.pin)) {
+      throw new Error('Le code PIN doit contenir exactement 4 chiffres.')
+    }
+
+    dbRun(`UPDATE profils
+      SET nom = ?, prenom = ?, reference_code = ?, role = ?, statut = ?, permissions = ?, pin_hash = ?
+      WHERE id = ?`, [
+      nom,
+      prenom,
+      referenceCode,
+      role,
+      statut,
+      serializePermissions(permissions, role),
+      nextPinHash,
+      id,
+    ])
+
+    if (Number(currentSession.operatorId || 0) === Number(id) && statut !== 'ACTIF') {
+      currentSession = { operatorId: null, loginAt: null }
+    }
+
+    const changes = []
+    if (current.nom !== nom || (current.prenom || '') !== prenom) changes.push(`Operateur: ${current.prenom ? `${current.prenom} ` : ''}${current.nom} -> ${prenom ? `${prenom} ` : ''}${nom}`)
+    if (normalizeReferenceCode(current.reference_code, current.id) !== referenceCode) changes.push(`Ref: ${normalizeReferenceCode(current.reference_code, current.id)} -> ${referenceCode}`)
+    if (current.role !== role) changes.push(`Role: ${current.role} -> ${role}`)
+    if (normalizeOperatorStatus(current.statut) !== statut) changes.push(`Statut: ${normalizeOperatorStatus(current.statut)} -> ${statut}`)
+    if (data?.pin) changes.push('PIN reinitialise')
+
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'OPERATEURS',
+      targetType: 'operateur',
+      targetId: id,
+      targetLabel: `${prenom ? `${prenom} ` : ''}${nom}`.trim(),
+      summary: `Operateur "${prenom ? `${prenom} ` : ''}${nom}" mis a jour.`,
+      details: changes.join(' - ') || 'Fiche operateur ajustee.',
+    })
+  }, { permission: 'utilisateurs_edit' })
+})
+
+safeHandle('profiles:delete', async (_, id) => {
+  await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM profils WHERE id = ?', [id])
+    if (!current) throw new Error('Operateur introuvable.')
+
+    const total = Number(dbGet('SELECT COUNT(*) AS c FROM profils')?.c || 0)
+    if (total <= 1) throw new Error('Il faut conserver au moins un operateur.')
+
+    dbRun('DELETE FROM profils WHERE id = ?', [id])
+    if (Number(currentSession.operatorId || 0) === Number(id)) {
+      currentSession = { operatorId: null, loginAt: null }
+    }
+
+    logAuditEntry({
+      action: 'DELETE',
+      module: 'OPERATEURS',
+      targetType: 'operateur',
+      targetId: id,
+      targetLabel: `${current.prenom ? `${current.prenom} ` : ''}${current.nom}`.trim(),
+      summary: `Operateur "${current.prenom ? `${current.prenom} ` : ''}${current.nom}" supprime.`,
+      details: `Ref ${normalizeReferenceCode(current.reference_code, current.id)} - role ${current.role}.`,
+    })
+  }, { permission: 'utilisateurs_edit' })
+})
+
+safeHandle('profiles:setActive', async (_, id) => {
+  throw new Error('L operateur actif est maintenant gere par la connexion operateur. Utilisez la connexion avec code PIN.')
+})
+
+// Session operateur
+safeHandle('auth:listOperators', () => {
+  ensureDefaultProfiles()
+  return dbAll(`SELECT * FROM profils
+    WHERE statut = 'ACTIF'
+    ORDER BY CAST(reference_code AS INTEGER) ASC, nom COLLATE NOCASE ASC`)
+    .map(row => {
+      const operator = sanitizeOperatorRow(row)
+      return {
+        id: operator.id,
+        nom: operator.nom,
+        prenom: operator.prenom,
+        nom_complet: operator.nom_complet,
+        reference_code: operator.reference_code,
+        role: operator.role,
+      }
+    })
+})
+
+safeHandle('auth:getSession', () => {
+  return getSessionStatus()
+})
+
+safeHandle('auth:login', async (_, credentials = {}) => {
+  const referenceCode = normalizeReferenceCode(credentials.reference_code)
+  const pin = normalizePin(credentials.pin)
+
+  if (!referenceCode) throw new Error('Le numero de reference est obligatoire.')
+  if (!pin) throw new Error('Le code PIN doit contenir exactement 4 chiffres.')
+
+  const operator = dbGet('SELECT * FROM profils WHERE reference_code = ?', [referenceCode])
+  if (!operator || normalizeOperatorStatus(operator.statut) !== 'ACTIF') {
+    throw new Error('Operateur introuvable ou inactif.')
+  }
+
+  if (!verifyPin(pin, operator.pin_hash)) {
+    throw new Error('Code PIN incorrect.')
+  }
+
+  const nextSession = {
+    operatorId: Number(operator.id),
+    loginAt: new Date().toISOString(),
+  }
+
+  currentSession = nextSession
+
+  if (canPersistOperatorSession()) {
+    try {
+      await withWriteTransaction(() => {
+        dbRun(`UPDATE profils
+          SET last_login_at = CURRENT_TIMESTAMP, actif = CASE WHEN id = ? THEN 1 ELSE 0 END`, [operator.id])
+        logAuditEntry({
+          action: 'LOGIN',
+          module: 'OPERATEURS',
+          targetType: 'operateur',
+          targetId: operator.id,
+          targetLabel: `${operator.prenom ? `${operator.prenom} ` : ''}${operator.nom}`.trim(),
+          summary: `Connexion de ${operator.prenom ? `${operator.prenom} ` : ''}${operator.nom}.`,
+          details: `Ref ${normalizeReferenceCode(operator.reference_code, operator.id)}.`,
+        })
+      }, { skipSession: true, skipRoleCheck: true })
+    } catch (error) {
+      currentSession = {
+        operatorId: null,
+        loginAt: null,
+      }
+      throw error
+    }
+  }
+
+  return getSessionStatus()
+})
+
+safeHandle('auth:logout', async () => {
+  const currentOperator = getCurrentOperatorRow()
+  if (currentOperator && canPersistOperatorSession()) {
+    try {
+      await withWriteTransaction(() => {
+        dbRun('UPDATE profils SET actif = 0')
+        logAuditEntry({
+          action: 'LOGOUT',
+          module: 'OPERATEURS',
+          targetType: 'operateur',
+          targetId: currentOperator.id,
+          targetLabel: `${currentOperator.prenom ? `${currentOperator.prenom} ` : ''}${currentOperator.nom}`.trim(),
+          summary: `Deconnexion de ${currentOperator.prenom ? `${currentOperator.prenom} ` : ''}${currentOperator.nom}.`,
+        })
+      }, { skipRoleCheck: true })
+    } catch (error) {
+      console.error('[DentaStock] Impossible de persister la deconnexion operateur:', error.message)
+    }
+  }
+
+  currentSession = {
+    operatorId: null,
+    loginAt: null,
+  }
+  return getSessionStatus()
+})
+
+// Journal d audit
+safeHandle('audit:list', (_, filters = {}) => {
+  const conditions = []
+  const params = []
+  const limit = Math.max(1, Math.min(Number(filters?.limit || 100), 500))
+
+  if (filters?.module) {
+    conditions.push('module = ?')
+    params.push(String(filters.module).trim().toUpperCase())
+  }
+
+  if (filters?.search && String(filters.search).trim()) {
+    const query = `%${String(filters.search).trim()}%`
+    conditions.push('(summary LIKE ? OR COALESCE(target_label, \'\') LIKE ? OR COALESCE(actor_name, \'\') LIKE ? OR COALESCE(details, \'\') LIKE ?)')
+    params.push(query, query, query, query)
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  return dbAll(`SELECT *
+    FROM audit_log
+    ${whereClause}
+    ORDER BY datetime(created_at) DESC, id DESC
+    LIMIT ${limit}`, params)
 })
 
 // Storage
 safeHandle('storage:getStatus', () => getStorageStatus())
 
 safeHandle('storage:setRoot', async (_, rootPath) => {
+  requireAuthenticatedOperator('parametres_edit')
   if (!rootPath) throw new Error('Veuillez selectionner un dossier de stockage.')
 
   const storageRoot = path.resolve(rootPath)
@@ -1433,30 +2190,42 @@ safeHandle('setup:getDefaults', () => {
     installDir: getInstallDir(),
     serverDataPath,
     serverDbPath: path.join(serverDataPath, DB_FILENAME),
+    defaultAdminReference: '1',
   }
 })
 
 safeHandle('setup:configure', async (_, config) => {
   const { mode, dataPath, seedFromReplica } = config
+  const initialAdminPin = normalizePin(config?.initialAdminPin)
 
   if (mode === 'server') {
     let localDataPath = getServerLocalDataPath()
     let targetDb = path.join(localDataPath, DB_FILENAME)
+    let isNewServerDatabase = !fs.existsSync(targetDb) || fs.statSync(targetDb).size === 0
 
     if (seedFromReplica) {
       const promoted = promoteReplicaToServer()
       localDataPath = promoted.localDataPath
       targetDb = promoted.targetDb
+      isNewServerDatabase = false
     } else {
       ensureDirectory(localDataPath)
       if (replicaInterval) {
         clearInterval(replicaInterval)
         replicaInterval = null
       }
+
+      if (isNewServerDatabase && !initialAdminPin) {
+        throw new Error('Veuillez definir le code PIN administrateur de depart avant de continuer.')
+      }
+
       saveSetupConfig({ mode: 'server', dataPath: localDataPath })
     }
 
     await initDatabase(targetDb)
+    if (!seedFromReplica && isNewServerDatabase) {
+      applyInitialAdministratorPin(initialAdminPin)
+    }
     return { success: true, mode: 'server', dataPath: localDataPath, promotedFromReplica: Boolean(seedFromReplica) }
   }
 
@@ -1552,6 +2321,7 @@ safeHandle('backup:status', () => {
 })
 
 safeHandle('backup:runNow', async () => {
+  requireAuthenticatedOperator('sauvegardes_edit')
   if (!db) throw new Error('Aucune base ouverte.')
   cleanupOldBackupFiles(new Date())
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -1561,6 +2331,7 @@ safeHandle('backup:runNow', async () => {
 })
 
 safeHandle('backup:runAutoNow', async () => {
+  requireAuthenticatedOperator('sauvegardes_edit')
   if (!db) throw new Error('Aucune base ouverte.')
 
   const weeklyPath = runWeeklyBackupIfNeeded(true)
@@ -1576,6 +2347,7 @@ safeHandle('backup:runAutoNow', async () => {
 })
 
 safeHandle('backup:verifyIntegrity', async (_, backupName) => {
+  requireAuthenticatedOperator('sauvegardes_edit')
   if (!SQL) {
     const initSqlJs = require('sql.js')
     const wasmPath = app.isPackaged
@@ -1588,6 +2360,7 @@ safeHandle('backup:verifyIntegrity', async (_, backupName) => {
 })
 
 safeHandle('backup:restore', async (_, backupName) => {
+  requireAuthenticatedOperator('sauvegardes_edit')
   const backupDir = getBackupDir()
   const backupPath = path.join(backupDir, backupName)
 
@@ -1641,37 +2414,81 @@ safeHandle('fournisseurs:listArchived', () => dbAll('SELECT * FROM fournisseurs 
 
 safeHandle('fournisseurs:archive', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM fournisseurs WHERE id = ?', [id])
     dbRun('UPDATE fournisseurs SET archived = 1 WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'ARCHIVE',
+        module: 'FOURNISSEURS',
+        targetType: 'fournisseur',
+        targetId: id,
+        targetLabel: current.nom,
+        summary: `Fournisseur "${current.nom}" archive.`,
+      })
+    }
+  }, { permission: 'fournisseurs_edit' })
 })
 
 safeHandle('fournisseurs:restore', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM fournisseurs WHERE id = ?', [id])
     dbRun('UPDATE fournisseurs SET archived = 0 WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'RESTORE',
+        module: 'FOURNISSEURS',
+        targetType: 'fournisseur',
+        targetId: id,
+        targetLabel: current.nom,
+        summary: `Fournisseur "${current.nom}" restaure.`,
+      })
+    }
+  }, { permission: 'fournisseurs_edit' })
 })
 
 safeHandle('fournisseurs:delete', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM fournisseurs WHERE id = ?', [id])
     const linked = dbGet('SELECT COUNT(*) AS c FROM produits WHERE fournisseur_id = ?', [id])
     if (linked && linked.c > 0) {
       throw new Error('Ce fournisseur est lie a des produits existants et ne peut pas etre supprime definitivement.')
     }
     dbRun('DELETE FROM fournisseurs WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'DELETE',
+        module: 'FOURNISSEURS',
+        targetType: 'fournisseur',
+        targetId: id,
+        targetLabel: current.nom,
+        summary: `Fournisseur "${current.nom}" supprime definitivement.`,
+      })
+    }
+  }, { permission: 'fournisseurs_edit' })
 })
 
 safeHandle('fournisseurs:add', async (_, data) => {
   return withWriteTransaction(() => {
-    return dbInsert(
+    const fournisseurId = dbInsert(
       'INSERT INTO fournisseurs (nom, email, telephone, adresse, contact_commercial) VALUES (?, ?, ?, ?, ?)',
       [data.nom, data.email, data.telephone, data.adresse, data.contact_commercial]
     )
-  })
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'FOURNISSEURS',
+      targetType: 'fournisseur',
+      targetId: fournisseurId,
+      targetLabel: data.nom,
+      summary: `Fournisseur "${data.nom}" ajoute.`,
+      details: data.contact_commercial ? `Contact: ${data.contact_commercial}.` : null,
+    })
+    return fournisseurId
+  }, { permission: 'fournisseurs_edit' })
 })
 
 safeHandle('fournisseurs:update', async (_, id, data) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM fournisseurs WHERE id = ?', [id])
     dbRun(`UPDATE fournisseurs
       SET nom = ?, email = ?, telephone = ?, adresse = ?, contact_commercial = ?
       WHERE id = ?`, [
@@ -1682,7 +2499,20 @@ safeHandle('fournisseurs:update', async (_, id, data) => {
       data.contact_commercial,
       id,
     ])
-  })
+    const changes = []
+    if ((current?.nom || '') !== (data.nom || '')) changes.push(`Nom: ${current?.nom || '-'} -> ${data.nom || '-'}`)
+    if ((current?.contact_commercial || '') !== (data.contact_commercial || '')) changes.push(`Contact: ${current?.contact_commercial || '-'} -> ${data.contact_commercial || '-'}`)
+    if ((current?.telephone || '') !== (data.telephone || '')) changes.push(`Telephone: ${current?.telephone || '-'} -> ${data.telephone || '-'}`)
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'FOURNISSEURS',
+      targetType: 'fournisseur',
+      targetId: id,
+      targetLabel: data.nom,
+      summary: `Fiche fournisseur "${data.nom}" mise a jour.`,
+      details: changes.join(' - ') || 'Coordonnees fournisseur mises a jour.',
+    })
+  }, { permission: 'fournisseurs_edit' })
 })
 
 // Categories
@@ -1695,11 +2525,21 @@ safeHandle('categories:list', () => {
 
 safeHandle('categories:add', async (_, data) => {
   return withWriteTransaction(() => {
-    return dbInsert('INSERT INTO categories (nom, description) VALUES (?, ?)', [
+    const categoryId = dbInsert('INSERT INTO categories (nom, description) VALUES (?, ?)', [
       data.nom,
       data.description || null,
     ])
-  })
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'CATEGORIES',
+      targetType: 'categorie',
+      targetId: categoryId,
+      targetLabel: data.nom,
+      summary: `Categorie "${data.nom}" ajoutee.`,
+      details: data.description || null,
+    })
+    return categoryId
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('categories:update', async (_, id, data) => {
@@ -1718,7 +2558,17 @@ safeHandle('categories:update', async (_, id, data) => {
     if (current.nom !== data.nom) {
       dbRun('UPDATE produits SET categorie = ? WHERE categorie = ?', [data.nom, current.nom])
     }
-  })
+
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'CATEGORIES',
+      targetType: 'categorie',
+      targetId: id,
+      targetLabel: data.nom,
+      summary: `Categorie "${current.nom}" mise a jour.`,
+      details: current.nom !== data.nom ? `Nom: ${current.nom} -> ${data.nom}` : (data.description || 'Description mise a jour.'),
+    })
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('categories:delete', async (_, id) => {
@@ -1730,7 +2580,16 @@ safeHandle('categories:delete', async (_, id) => {
 
     dbRun('UPDATE produits SET categorie = NULL WHERE categorie = ?', [current.nom])
     dbRun('DELETE FROM categories WHERE id = ?', [id])
-  })
+    logAuditEntry({
+      action: 'DELETE',
+      module: 'CATEGORIES',
+      targetType: 'categorie',
+      targetId: id,
+      targetLabel: current.nom,
+      summary: `Categorie "${current.nom}" supprimee.`,
+      details: 'Les produits associes repassent en non classe.',
+    })
+  }, { permission: 'produits_edit' })
 })
 
 // Produits
@@ -1752,25 +2611,58 @@ safeHandle('produits:listArchived', () => {
 
 safeHandle('produits:archive', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM produits WHERE id = ?', [id])
     dbRun('UPDATE produits SET archived = 1 WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'ARCHIVE',
+        module: 'PRODUITS',
+        targetType: 'produit',
+        targetId: id,
+        targetLabel: current.nom,
+        summary: `Produit "${current.nom}" archive.`,
+      })
+    }
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('produits:restore', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM produits WHERE id = ?', [id])
     dbRun('UPDATE produits SET archived = 0 WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'RESTORE',
+        module: 'PRODUITS',
+        targetType: 'produit',
+        targetId: id,
+        targetLabel: current.nom,
+        summary: `Produit "${current.nom}" restaure.`,
+      })
+    }
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('produits:delete', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM produits WHERE id = ?', [id])
     const linked = dbGet('SELECT COUNT(*) AS c FROM commande_items WHERE produit_id = ?', [id])
     const linked2 = dbGet('SELECT COUNT(*) AS c FROM utilisation_items WHERE produit_id = ?', [id])
     if ((linked && linked.c > 0) || (linked2 && linked2.c > 0)) {
       throw new Error('Ce produit est lie a des commandes ou consommations et ne peut pas etre supprime definitivement. Archivez-le a la place.')
     }
     dbRun('DELETE FROM produits WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'DELETE',
+        module: 'PRODUITS',
+        targetType: 'produit',
+        targetId: id,
+        targetLabel: current.nom,
+        summary: `Produit "${current.nom}" supprime definitivement.`,
+      })
+    }
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('produits:add', async (_, data) => {
@@ -1779,7 +2671,7 @@ safeHandle('produits:add', async (_, data) => {
       dbRun('INSERT OR IGNORE INTO categories (nom) VALUES (?)', [data.categorie])
     }
 
-    return dbInsert(`INSERT INTO produits (
+    const produitId = dbInsert(`INSERT INTO produits (
       reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire, fournisseur_id, date_peremption, code_barre
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       data.reference,
@@ -1793,11 +2685,22 @@ safeHandle('produits:add', async (_, data) => {
       data.date_peremption || null,
       data.code_barre || null,
     ])
-  })
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'PRODUITS',
+      targetType: 'produit',
+      targetId: produitId,
+      targetLabel: data.nom,
+      summary: `Produit "${data.nom}" ajoute au catalogue.`,
+      details: `Stock initial: ${Number(data.stock_actuel || 0)} ${data.unite || 'unite'} - seuil: ${Number(data.stock_minimum || 0)}.`,
+    })
+    return produitId
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('produits:update', async (_, id, data) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM produits WHERE id = ?', [id])
     if (data.categorie) {
       dbRun('INSERT OR IGNORE INTO categories (nom) VALUES (?)', [data.categorie])
     }
@@ -1817,7 +2720,22 @@ safeHandle('produits:update', async (_, id, data) => {
       data.code_barre || null,
       id,
     ])
-  })
+    const changes = []
+    if ((current?.nom || '') !== (data.nom || '')) changes.push(`Nom: ${current?.nom || '-'} -> ${data.nom || '-'}`)
+    if (Number(current?.stock_actuel || 0) !== Number(data.stock_actuel || 0)) changes.push(`Stock: ${Number(current?.stock_actuel || 0)} -> ${Number(data.stock_actuel || 0)}`)
+    if (Number(current?.stock_minimum || 0) !== Number(data.stock_minimum || 0)) changes.push(`Seuil: ${Number(current?.stock_minimum || 0)} -> ${Number(data.stock_minimum || 0)}`)
+    if ((current?.categorie || '') !== (data.categorie || '')) changes.push(`Categorie: ${current?.categorie || 'Non classe'} -> ${data.categorie || 'Non classe'}`)
+    if (Number(current?.prix_unitaire || 0) !== Number(data.prix_unitaire || 0)) changes.push(`Prix HT: ${Number(current?.prix_unitaire || 0)} -> ${Number(data.prix_unitaire || 0)}`)
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'PRODUITS',
+      targetType: 'produit',
+      targetId: id,
+      targetLabel: data.nom,
+      summary: `Fiche produit "${data.nom}" mise a jour.`,
+      details: changes.join(' - ') || 'Ajustement de la fiche produit.',
+    })
+  }, { permission: 'produits_edit' })
 })
 
 safeHandle('produits:history', (_, id) => {
@@ -1961,8 +2879,17 @@ safeHandle('commandes:add', async (_, data) => {
       ])
     }
 
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'COMMANDES',
+      targetType: 'commande',
+      targetId: commandeId,
+      targetLabel: data.reference_commande || `Commande #${commandeId}`,
+      summary: `Commande ${data.reference_commande || `#${commandeId}`} enregistree.`,
+      details: `${(data.items || []).length} ligne(s) - fournisseur #${data.fournisseur_id || 'non renseigne'}.`,
+    })
     return commandeId
-  })
+  }, { permission: 'commandes_edit' })
 })
 
 safeHandle('commandes:update', async (_, id, data) => {
@@ -2004,21 +2931,54 @@ safeHandle('commandes:update', async (_, id, data) => {
     } else {
       syncCommandeStatus(id, requestedStatus)
     }
-  })
+
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'COMMANDES',
+      targetType: 'commande',
+      targetId: id,
+      targetLabel: data.reference_commande || current.reference_commande || `Commande #${id}`,
+      summary: `Commande ${data.reference_commande || current.reference_commande || `#${id}`} mise a jour.`,
+      details: `Statut demande: ${requestedStatus} - ${(data.items || []).length} ligne(s).`,
+    })
+  }, { permission: 'commandes_edit' })
 })
 
 safeHandle('commandes:updateStatus', async (_, id, statut) => {
   await withWriteTransaction(() => {
-    dbRun('UPDATE commandes SET statut = ? WHERE id = ?', [normalizeCommandeStatus(statut), id])
-  })
+    const current = dbGet('SELECT * FROM commandes WHERE id = ?', [id])
+    const nextStatus = normalizeCommandeStatus(statut)
+    dbRun('UPDATE commandes SET statut = ? WHERE id = ?', [nextStatus, id])
+    if (current) {
+      logAuditEntry({
+        action: 'STATUS',
+        module: 'COMMANDES',
+        targetType: 'commande',
+        targetId: id,
+        targetLabel: current.reference_commande || `Commande #${id}`,
+        summary: `Statut de ${current.reference_commande || `commande #${id}`} passe a ${nextStatus}.`,
+      })
+    }
+  }, { permission: 'commandes_edit' })
 })
 
 safeHandle('commandes:delete', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM commandes WHERE id = ?', [id])
     // Supprimer les items de la commande puis la commande elle-meme
     dbRun('DELETE FROM commande_items WHERE commande_id = ?', [id])
     dbRun('DELETE FROM commandes WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'DELETE',
+        module: 'COMMANDES',
+        targetType: 'commande',
+        targetId: id,
+        targetLabel: current.reference_commande || `Commande #${id}`,
+        summary: `Commande ${current.reference_commande || `#${id}`} supprimee.`,
+      })
+    }
+  }, { permission: 'commandes_edit' })
 })
 
 safeHandle('commandes:exportPdf', async (_, commandeId) => {
@@ -2125,14 +3085,28 @@ safeHandle('inventaire:adjust', async (_, adjustments) => {
   // adjustments = [{ produit_id, stock_reel, motif }]
   return withWriteTransaction(() => {
     let count = 0
+    const touched = []
     for (const adj of adjustments) {
       if (adj.stock_reel !== undefined && adj.stock_reel !== null) {
+        const produit = dbGet('SELECT nom, stock_actuel, unite FROM produits WHERE id = ?', [adj.produit_id])
         dbRun('UPDATE produits SET stock_actuel = ? WHERE id = ?', [adj.stock_reel, adj.produit_id])
         count++
+        if (produit) {
+          touched.push(`${produit.nom}: ${Number(produit.stock_actuel || 0)} -> ${Number(adj.stock_reel || 0)} ${produit.unite || ''}`.trim())
+        }
       }
     }
+    if (count > 0) {
+      logAuditEntry({
+        action: 'ADJUST',
+        module: 'STOCK',
+        targetType: 'inventaire',
+        summary: `Inventaire ajuste sur ${count} produit(s).`,
+        details: touched.slice(0, 6).join(' - '),
+      })
+    }
     return { adjusted: count }
-  })
+  }, { permission: 'stock_edit' })
 })
 
 // Retours fournisseur
@@ -2163,8 +3137,17 @@ safeHandle('retours:add', async (_, data) => {
       dbRun('UPDATE produits SET stock_actuel = MAX(0, stock_actuel - ?) WHERE id = ?', [Number(item.quantite || 0), item.produit_id])
     }
 
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'RETOURS',
+      targetType: 'retour',
+      targetId: retourId,
+      targetLabel: `Retour #${retourId}`,
+      summary: `Retour fournisseur #${retourId} enregistre.`,
+      details: `${(data.items || []).length} ligne(s) - motif: ${data.motif || 'non renseigne'}.`,
+    })
     return retourId
-  })
+  }, { permission: 'receptions_edit' })
 })
 
 // Praticiens
@@ -2174,42 +3157,95 @@ safeHandle('praticiens:listArchived', () => dbAll('SELECT * FROM praticiens WHER
 
 safeHandle('praticiens:archive', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM praticiens WHERE id = ?', [id])
     dbRun('UPDATE praticiens SET archived = 1 WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'ARCHIVE',
+        module: 'PRATICIENS',
+        targetType: 'praticien',
+        targetId: id,
+        targetLabel: `${current.prenom ? `${current.prenom} ` : ''}${current.nom}`.trim(),
+        summary: `Praticien "${current.prenom ? `${current.prenom} ` : ''}${current.nom}" archive.`,
+      })
+    }
+  }, { permission: 'praticiens_edit' })
 })
 
 safeHandle('praticiens:restore', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM praticiens WHERE id = ?', [id])
     dbRun('UPDATE praticiens SET archived = 0 WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'RESTORE',
+        module: 'PRATICIENS',
+        targetType: 'praticien',
+        targetId: id,
+        targetLabel: `${current.prenom ? `${current.prenom} ` : ''}${current.nom}`.trim(),
+        summary: `Praticien "${current.prenom ? `${current.prenom} ` : ''}${current.nom}" restaure.`,
+      })
+    }
+  }, { permission: 'praticiens_edit' })
 })
 
 safeHandle('praticiens:add', async (_, data) => {
   return withWriteTransaction(() => {
-    return dbInsert('INSERT INTO praticiens (nom, prenom, role) VALUES (?, ?, ?)', [
+    const praticienId = dbInsert('INSERT INTO praticiens (nom, prenom, role) VALUES (?, ?, ?)', [
       data.nom,
       data.prenom,
       data.role,
     ])
-  })
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'PRATICIENS',
+      targetType: 'praticien',
+      targetId: praticienId,
+      targetLabel: `${data.prenom ? `${data.prenom} ` : ''}${data.nom}`.trim(),
+      summary: `Praticien "${data.prenom ? `${data.prenom} ` : ''}${data.nom}" ajoute.`,
+      details: `Role: ${data.role || 'praticien'}.`,
+    })
+    return praticienId
+  }, { permission: 'praticiens_edit' })
 })
 
 safeHandle('praticiens:update', async (_, id, data) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM praticiens WHERE id = ?', [id])
     dbRun('UPDATE praticiens SET nom = ?, prenom = ?, role = ? WHERE id = ?', [
       data.nom, data.prenom, data.role, id,
     ])
-  })
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'PRATICIENS',
+      targetType: 'praticien',
+      targetId: id,
+      targetLabel: `${data.prenom ? `${data.prenom} ` : ''}${data.nom}`.trim(),
+      summary: `Fiche praticien "${data.prenom ? `${data.prenom} ` : ''}${data.nom}" mise a jour.`,
+      details: current?.role !== data.role ? `Role: ${current?.role || '-'} -> ${data.role || '-'}` : null,
+    })
+  }, { permission: 'praticiens_edit' })
 })
 
 safeHandle('praticiens:delete', async (_, id) => {
   await withWriteTransaction(() => {
+    const current = dbGet('SELECT * FROM praticiens WHERE id = ?', [id])
     const linked = dbGet('SELECT COUNT(*) AS c FROM utilisations WHERE praticien_id = ?', [id])
     if (linked && linked.c > 0) {
       throw new Error('Ce praticien est lie a des consommations existantes et ne peut pas etre supprime definitivement. Archivez-le a la place.')
     }
     dbRun('DELETE FROM praticiens WHERE id = ?', [id])
-  })
+    if (current) {
+      logAuditEntry({
+        action: 'DELETE',
+        module: 'PRATICIENS',
+        targetType: 'praticien',
+        targetId: id,
+        targetLabel: `${current.prenom ? `${current.prenom} ` : ''}${current.nom}`.trim(),
+        summary: `Praticien "${current.prenom ? `${current.prenom} ` : ''}${current.nom}" supprime definitivement.`,
+      })
+    }
+  }, { permission: 'praticiens_edit' })
 })
 
 // Receptions
@@ -2255,7 +3291,17 @@ safeHandle('receptions:add', async (_, data) => {
       : null
 
     if (existingReceptionId) {
-      return appendToReception(existingReceptionId, data)
+      const receptionId = appendToReception(existingReceptionId, data)
+      logAuditEntry({
+        action: 'APPEND',
+        module: 'RECEPTIONS',
+        targetType: 'reception',
+        targetId: receptionId,
+        targetLabel: data.reference_bl || `Reception #${receptionId}`,
+        summary: `Reception partielle ajoutee a ${data.reference_bl || `la reception #${receptionId}`}.`,
+        details: `${(data.items || []).length} ligne(s) sur un passage supplementaire.`,
+      })
+      return receptionId
     }
 
     const fournisseurNom = getFournisseurNomById(data.fournisseur_id)
@@ -2350,8 +3396,17 @@ safeHandle('receptions:add', async (_, data) => {
       document_path: archivedDocumentPath,
     })
 
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'RECEPTIONS',
+      targetType: 'reception',
+      targetId: receptionId,
+      targetLabel: data.reference_bl || `Reception #${receptionId}`,
+      summary: `Reception ${data.reference_bl || `#${receptionId}`} enregistree.`,
+      details: `${(data.items || []).length} ligne(s) - fournisseur #${data.fournisseur_id || 'non renseigne'}.`,
+    })
     return receptionId
-  })
+  }, { permission: 'receptions_edit' })
 })
 
 safeHandle('receptions:update', async (_, id, data) => {
@@ -2494,7 +3549,17 @@ safeHandle('receptions:update', async (_, id, data) => {
     )
 
     impactedCommandes.forEach(commandeId => syncCommandeStatus(commandeId))
-  })
+
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'RECEPTIONS',
+      targetType: 'reception',
+      targetId: id,
+      targetLabel: data.reference_bl || current.reference_bl || `Reception #${id}`,
+      summary: `Reception ${data.reference_bl || current.reference_bl || `#${id}`} mise a jour.`,
+      details: `${(data.items || []).length} ligne(s) - ${passageCount > 1 ? 'reception multi-passages' : 'reception simple'}.`,
+    })
+  }, { permission: 'receptions_edit' })
 })
 
 // Utilisations
@@ -2544,8 +3609,17 @@ safeHandle('utilisations:add', async (_, data) => {
       ])
     }
 
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'CONSOMMATION',
+      targetType: 'utilisation',
+      targetId: utilisationId,
+      targetLabel: data.type_soin || `Consommation #${utilisationId}`,
+      summary: `Consommation ${data.type_soin || `#${utilisationId}`} enregistree.`,
+      details: `${(data.items || []).length} ligne(s) - praticien #${data.praticien_id || 'non renseigne'}.`,
+    })
     return utilisationId
-  })
+  }, { permission: 'stock_edit' })
 })
 
 // Soins templates
@@ -2596,7 +3670,7 @@ safeHandle('documents:add', async (_, data) => {
       data.montant,
       data.notes,
     ])
-  })
+  }, { permission: 'receptions_edit' })
 })
 
 safeHandle('documents:open', (_, cheminFichier) => {
@@ -2699,6 +3773,7 @@ safeHandle('dialog:openDirectory', async () => {
 
 // Export / Import base de donnees
 safeHandle('db:export', async () => {
+  requireAuthenticatedOperator('sauvegardes_edit')
   if (!db) throw new Error('Aucune base de donnees ouverte.')
 
   const timestamp = new Date().toISOString().slice(0, 10)
@@ -2716,6 +3791,7 @@ safeHandle('db:export', async () => {
 })
 
 safeHandle('db:import', async () => {
+  requireAuthenticatedOperator('sauvegardes_edit')
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Importer une base de donnees',
     filters: [{ name: 'Base SQLite', extensions: ['db'] }],
@@ -2836,10 +3912,14 @@ safeHandle('stats:valeurStock', () => {
   return row || { nb_produits: 0, valeur_totale: 0, nb_alertes: 0 }
 })
 
+safeHandle('commandes:advisor', () => {
+  return getCommandeAdvisorRows()
+})
+
 // --- Commande automatique ---
 safeHandle('commandes:autoGenerate', async () => {
-  const alertProducts = dbAll(`SELECT p.id, p.nom, p.stock_actuel, p.stock_minimum, p.prix_unitaire, p.fournisseur_id
-    FROM produits p WHERE p.archived = 0 AND p.stock_actuel <= p.stock_minimum AND p.fournisseur_id IS NOT NULL`)
+  requireAuthenticatedOperator('commandes_generate')
+  const alertProducts = getCommandeAdvisorRows().filter(produit => produit.fournisseur_id && produit.quantite_a_commander > 0)
 
   if (alertProducts.length === 0) return { created: 0, commandes: [] }
 
@@ -2865,14 +3945,23 @@ safeHandle('commandes:autoGenerate', async () => {
       const commandeId = dbGet('SELECT last_insert_rowid() as id').id
 
       produits.forEach(p => {
-        const qte = Math.max(1, Math.ceil((p.stock_minimum * 2) - p.stock_actuel))
+        const qte = Math.max(1, Number(p.quantite_a_commander || p.quantite_conseillee || 0))
         dbRun(`INSERT INTO commande_items (commande_id, produit_id, quantite, prix_unitaire)
-          VALUES (?, ?, ?, ?)`, [commandeId, p.id, qte, p.prix_unitaire || 0])
+          VALUES (?, ?, ?, ?)`, [commandeId, p.id, qte, p.prix_reference || p.prix_unitaire || 0])
       })
 
+      logAuditEntry({
+        action: 'CREATE',
+        module: 'COMMANDES',
+        targetType: 'commande',
+        targetId: commandeId,
+        targetLabel: ref,
+        summary: `Commande automatique ${ref} generee.`,
+        details: `${produits.length} produit(s) prepares pour le fournisseur #${fournisseurId}.`,
+      })
       createdCommandes.push({ id: commandeId, reference: ref, fournisseur_id: Number(fournisseurId), nb_produits: produits.length })
     }
-  })
+  }, { permission: 'commandes_generate' })
 
   return { created: createdCommandes.length, commandes: createdCommandes }
 })
@@ -3030,22 +4119,48 @@ safeHandle('remises:list', (_, fournisseurId) => {
 
 safeHandle('remises:add', async (_, data) => {
   return withWriteTransaction(() => {
-    dbRun('INSERT INTO remises_fournisseur (fournisseur_id, seuil_quantite, remise_pourcent, description) VALUES (?, ?, ?, ?)',
+    const remiseId = dbInsert('INSERT INTO remises_fournisseur (fournisseur_id, seuil_quantite, remise_pourcent, description) VALUES (?, ?, ?, ?)',
       [data.fournisseur_id, data.seuil_quantite, data.remise_pourcent, data.description || null])
-  })
+    logAuditEntry({
+      action: 'CREATE',
+      module: 'REMISES',
+      targetType: 'remise',
+      targetId: remiseId,
+      targetLabel: `Remise fournisseur #${remiseId}`,
+      summary: `Remise fournisseur ajoutee.`,
+      details: `Seuil ${data.seuil_quantite} - ${data.remise_pourcent}%`,
+    })
+  }, { permission: 'fournisseurs_edit' })
 })
 
 safeHandle('remises:update', async (_, id, data) => {
   return withWriteTransaction(() => {
     dbRun('UPDATE remises_fournisseur SET seuil_quantite = ?, remise_pourcent = ?, description = ? WHERE id = ?',
       [data.seuil_quantite, data.remise_pourcent, data.description || null, id])
-  })
+    logAuditEntry({
+      action: 'UPDATE',
+      module: 'REMISES',
+      targetType: 'remise',
+      targetId: id,
+      targetLabel: `Remise fournisseur #${id}`,
+      summary: `Remise fournisseur mise a jour.`,
+      details: `Seuil ${data.seuil_quantite} - ${data.remise_pourcent}%`,
+    })
+  }, { permission: 'fournisseurs_edit' })
 })
 
 safeHandle('remises:delete', async (_, id) => {
   return withWriteTransaction(() => {
     dbRun('DELETE FROM remises_fournisseur WHERE id = ?', [id])
-  })
+    logAuditEntry({
+      action: 'DELETE',
+      module: 'REMISES',
+      targetType: 'remise',
+      targetId: id,
+      targetLabel: `Remise fournisseur #${id}`,
+      summary: `Remise fournisseur supprimee.`,
+    })
+  }, { permission: 'fournisseurs_edit' })
 })
 
 // Calcul prix avec remise

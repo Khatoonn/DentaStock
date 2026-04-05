@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 export default function Setup({ onComplete }) {
   const [mode, setMode] = useState(null)
   const [networkPath, setNetworkPath] = useState('')
+  const [adminPin, setAdminPin] = useState('')
+  const [adminPinConfirm, setAdminPinConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [defaults, setDefaults] = useState(null)
@@ -13,6 +15,7 @@ export default function Setup({ onComplete }) {
   }, [])
 
   const serverDataPath = defaults?.serverDataPath || '...'
+  const defaultAdminReference = defaults?.defaultAdminReference || '1'
   const serverShareName = serverDataPath.split(/[\\/]/).filter(Boolean).pop() || 'data'
   const serverShareExample = `\\\\NOM-DU-PC\\${serverShareName}`
 
@@ -27,7 +30,17 @@ export default function Setup({ onComplete }) {
 
     try {
       if (mode === 'server') {
-        await window.api.setupConfigure({ mode: 'server' })
+        if (adminPin.length !== 4) {
+          setError('Veuillez definir un code PIN administrateur a 4 chiffres.')
+          setLoading(false)
+          return
+        }
+        if (adminPin !== adminPinConfirm) {
+          setError('La confirmation du code PIN administrateur ne correspond pas.')
+          setLoading(false)
+          return
+        }
+        await window.api.setupConfigure({ mode: 'server', initialAdminPin: adminPin })
       } else {
         if (!networkPath.trim()) {
           setError('Veuillez indiquer le chemin vers le dossier data du serveur.')
@@ -62,7 +75,7 @@ export default function Setup({ onComplete }) {
         {!mode && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <button
-              onClick={() => setMode('server')}
+              onClick={() => { setMode('server'); setError('') }}
               className="bg-slate-800 border-2 border-slate-700 hover:border-sky-500 rounded-xl p-6 text-left transition-colors group"
             >
               <div className="w-12 h-12 rounded-xl bg-sky-500/15 flex items-center justify-center mb-4">
@@ -80,7 +93,7 @@ export default function Setup({ onComplete }) {
             </button>
 
             <button
-              onClick={() => setMode('client')}
+              onClick={() => { setMode('client'); setError('') }}
               className="bg-slate-800 border-2 border-slate-700 hover:border-emerald-500 rounded-xl p-6 text-left transition-colors group"
             >
               <div className="w-12 h-12 rounded-xl bg-emerald-500/15 flex items-center justify-center mb-4">
@@ -124,8 +137,55 @@ export default function Setup({ onComplete }) {
               </ol>
             </div>
 
+            <div className="bg-slate-900/60 border border-slate-700 rounded-lg p-4 space-y-4">
+              <div>
+                <h4 className="text-sm font-medium text-white">Compte administrateur de depart</h4>
+                <p className="text-xs text-slate-400 mt-1">
+                  L administrateur cree a l installation utilisera la reference <span className="text-sky-300 font-medium">{defaultAdminReference}</span>.
+                  Definissez maintenant son code PIN pour eviter un code par defaut.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-2">Code PIN administrateur</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={adminPin}
+                    onChange={e => setAdminPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="0000"
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-2">Confirmation du PIN</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={adminPinConfirm}
+                    onChange={e => setAdminPinConfirm(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="0000"
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500"
+                  />
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-500">
+                Vous pourrez ensuite modifier ce compte et ajouter d autres operateurs depuis les parametres du logiciel.
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+
             <div className="flex items-center gap-3">
-              <button onClick={() => setMode(null)}
+              <button onClick={() => { setMode(null); setError('') }}
                 className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
                 Retour
               </button>

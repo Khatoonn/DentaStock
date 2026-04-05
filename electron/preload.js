@@ -22,6 +22,23 @@ contextBridge.exposeInMainWorld('api', {
   configGet: cle => ipcRenderer.invoke('config:get', cle),
   configSet: (cle, valeur) => ipcRenderer.invoke('config:set', cle, valeur),
 
+  // Profils
+  profilesList: () => ipcRenderer.invoke('profiles:list'),
+  profilesGetActive: () => ipcRenderer.invoke('profiles:getActive'),
+  profilesAdd: data => ipcRenderer.invoke('profiles:add', data),
+  profilesUpdate: (id, data) => ipcRenderer.invoke('profiles:update', id, data),
+  profilesDelete: id => ipcRenderer.invoke('profiles:delete', id),
+  profilesSetActive: id => ipcRenderer.invoke('profiles:setActive', id),
+
+  // Session operateur
+  authListOperators: () => ipcRenderer.invoke('auth:listOperators'),
+  authGetSession: () => ipcRenderer.invoke('auth:getSession'),
+  authLogin: credentials => ipcRenderer.invoke('auth:login', credentials),
+  authLogout: () => ipcRenderer.invoke('auth:logout'),
+
+  // Audit
+  auditList: filters => ipcRenderer.invoke('audit:list', filters),
+
   // Stockage
   storageGetStatus: () => ipcRenderer.invoke('storage:getStatus'),
   storageSetRoot: rootPath => ipcRenderer.invoke('storage:setRoot', rootPath),
@@ -59,6 +76,7 @@ contextBridge.exposeInMainWorld('api', {
   commandesUpdateStatus: (id, statut) => ipcRenderer.invoke('commandes:updateStatus', id, statut),
   commandesDelete: id => ipcRenderer.invoke('commandes:delete', id),
   commandesExportPdf: id => ipcRenderer.invoke('commandes:exportPdf', id),
+  commandesAdvisor: () => ipcRenderer.invoke('commandes:advisor'),
 
   // Inventaire
   inventaireList: () => ipcRenderer.invoke('inventaire:list'),

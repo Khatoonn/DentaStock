@@ -11,6 +11,58 @@ const DEMO_STATUS = {
   documentsPath: 'E:\\Cabinet\\DentaStock\\documents',
 }
 
+const PROFILE_ROLE_OPTIONS = [
+  { value: 'ADMIN', label: 'Administrateur', hint: 'Acces complet au parametrage et aux modifications' },
+  { value: 'EQUIPE', label: 'Equipe', hint: 'Saisie et gestion quotidienne du stock' },
+  { value: 'LECTURE', label: 'Lecture seule', hint: 'Consultation sans modification' },
+]
+
+const PERMISSION_OPTIONS = [
+  { key: 'commandes_generate', label: 'Generation commande', hint: 'Creer une commande automatique ou preparee' },
+  { key: 'commandes_edit', label: 'Modification commande', hint: 'Modifier, annuler ou supprimer une commande' },
+  { key: 'receptions_edit', label: 'Reception / retours', hint: 'Valider une reception ou un retour fournisseur' },
+  { key: 'stock_edit', label: 'Modification stock', hint: 'Corriger un stock ou enregistrer une consommation' },
+  { key: 'fournisseurs_edit', label: 'Modification fournisseur', hint: 'Creer ou modifier les fournisseurs et remises' },
+  { key: 'produits_edit', label: 'Modification produit', hint: 'Creer, modifier ou archiver produits et categories' },
+  { key: 'praticiens_edit', label: 'Modification praticien', hint: 'Creer ou modifier les praticiens' },
+  { key: 'utilisateurs_edit', label: 'Gestion operateurs', hint: 'Creer les operateurs et definir les droits' },
+  { key: 'parametres_edit', label: 'Parametres sensibles', hint: 'Changer le stockage et la configuration du poste' },
+  { key: 'sauvegardes_edit', label: 'Sauvegarde / restauration', hint: 'Exporter, importer, restaurer et verifier les sauvegardes' },
+]
+
+function buildDefaultPermissions(role = 'EQUIPE') {
+  if (role === 'ADMIN') {
+    return Object.fromEntries(PERMISSION_OPTIONS.map(permission => [permission.key, true]))
+  }
+  if (role === 'LECTURE') {
+    return Object.fromEntries(PERMISSION_OPTIONS.map(permission => [permission.key, false]))
+  }
+  return {
+    commandes_generate: true,
+    commandes_edit: true,
+    receptions_edit: true,
+    stock_edit: true,
+    fournisseurs_edit: false,
+    produits_edit: false,
+    praticiens_edit: false,
+    utilisateurs_edit: false,
+    parametres_edit: false,
+    sauvegardes_edit: false,
+  }
+}
+
+function createEmptyProfileForm() {
+  return {
+    nom: '',
+    prenom: '',
+    reference_code: '',
+    pin: '',
+    statut: 'ACTIF',
+    role: 'EQUIPE',
+    permissions: buildDefaultPermissions('EQUIPE'),
+  }
+}
+
 function PathBlock({ label, value }) {
   return (
     <div className="space-y-1.5">
@@ -32,21 +84,30 @@ export default function Parametres() {
   const [saving, setSaving] = useState(false)
   const [runningAutoBackup, setRunningAutoBackup] = useState(false)
   const [verifyingBackup, setVerifyingBackup] = useState('')
+  const [profiles, setProfiles] = useState([])
+  const [currentSession, setCurrentSession] = useState(null)
+  const [profileForm, setProfileForm] = useState(createEmptyProfileForm)
+  const [editingProfileId, setEditingProfileId] = useState(null)
+  const [savingProfile, setSavingProfile] = useState(false)
 
   const load = async () => {
     setLoading(true)
 
     if (isElectron) {
       try {
-        const [nextStatus, nextSetup, nextBackup] = await Promise.all([
+        const [nextStatus, nextSetup, nextBackup, nextProfiles, nextSession] = await Promise.all([
           window.api.storageGetStatus(),
           window.api.setupGetConfig(),
           window.api.backupStatus(),
+          window.api.profilesList ? window.api.profilesList() : Promise.resolve([]),
+          window.api.authGetSession ? window.api.authGetSession() : Promise.resolve(null),
         ])
         setStatus(nextStatus)
         setSetupConfig(nextSetup)
         setBackupInfo(nextBackup)
         setFolderPath(nextStatus.storageRoot || '')
+        setProfiles(nextProfiles || [])
+        setCurrentSession(nextSession || null)
       } catch (err) {
         toast(err.message || 'Impossible de charger la configuration de stockage.', 'error')
       } finally {
@@ -61,7 +122,16 @@ export default function Parametres() {
   }
 
   useEffect(() => {
-    load()
+    void load()
+  }, [])
+
+  useEffect(() => {
+    const refresh = () => void load()
+    window.addEventListener('dentastock-session-changed', refresh)
+
+    return () => {
+      window.removeEventListener('dentastock-session-changed', refresh)
+    }
   }, [])
 
   const pickDirectory = async () => {
@@ -110,6 +180,12 @@ export default function Parametres() {
   }
 
   const sharedMode = status?.mode === 'shared'
+  const canManageOperators = Boolean(currentSession?.operator?.permissions?.utilisateurs_edit)
+
+  const resetProfileForm = () => {
+    setProfileForm(createEmptyProfileForm())
+    setEditingProfileId(null)
+  }
 
   const runAutoBackupNow = async () => {
     if (!isElectron) return
@@ -140,6 +216,96 @@ export default function Parametres() {
       toast(err.message || 'Impossible de verifier la sauvegarde.', 'error')
     } finally {
       setVerifyingBackup('')
+    }
+  }
+
+  const saveProfile = async () => {
+    if (!isElectron) return
+    if (!canManageOperators) {
+      toast('Votre operateur ne dispose pas du droit de gestion des operateurs.', 'error')
+      return
+    }
+    if (!profileForm.nom.trim()) {
+      toast('Le nom de l operateur est obligatoire.', 'error')
+      return
+    }
+    if (!profileForm.reference_code.trim()) {
+      toast('Le numero de reference est obligatoire.', 'error')
+      return
+    }
+    if (!editingProfileId && profileForm.pin.length !== 4) {
+      toast('Le code PIN doit contenir exactement 4 chiffres.', 'error')
+      return
+    }
+
+    setSavingProfile(true)
+    try {
+      if (editingProfileId) {
+        await window.api.profilesUpdate(editingProfileId, {
+          nom: profileForm.nom.trim(),
+          prenom: profileForm.prenom.trim(),
+          reference_code: profileForm.reference_code.trim(),
+          pin: profileForm.pin,
+          statut: profileForm.statut,
+          role: profileForm.role,
+          permissions: profileForm.permissions,
+        })
+        toast('Operateur mis a jour.', 'success')
+      } else {
+        await window.api.profilesAdd({
+          nom: profileForm.nom.trim(),
+          prenom: profileForm.prenom.trim(),
+          reference_code: profileForm.reference_code.trim(),
+          pin: profileForm.pin,
+          statut: profileForm.statut,
+          role: profileForm.role,
+          permissions: profileForm.permissions,
+        })
+        toast('Operateur ajoute.', 'success')
+      }
+      resetProfileForm()
+      await load()
+      window.dispatchEvent(new Event('dentastock-session-changed'))
+    } catch (err) {
+      toast(err.message || 'Impossible d enregistrer l operateur.', 'error')
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const editProfile = profile => {
+    if (!canManageOperators) {
+      toast('Votre operateur ne dispose pas du droit de gestion des operateurs.', 'error')
+      return
+    }
+    setProfileForm({
+      nom: profile.nom || '',
+      prenom: profile.prenom || '',
+      reference_code: profile.reference_code || '',
+      pin: '',
+      statut: profile.statut || 'ACTIF',
+      role: profile.role || 'EQUIPE',
+      permissions: profile.permissions || buildDefaultPermissions(profile.role || 'EQUIPE'),
+    })
+    setEditingProfileId(profile.id)
+  }
+
+  const deleteProfile = async profile => {
+    if (!canManageOperators) {
+      toast('Votre operateur ne dispose pas du droit de gestion des operateurs.', 'error')
+      return
+    }
+    if (!(await confirm(`Supprimer l operateur "${profile.nom_complet || profile.nom}" ?`))) return
+    try {
+      await window.api.profilesDelete(profile.id)
+      if (editingProfileId === profile.id) {
+        resetProfileForm()
+      }
+      await load()
+      window.dispatchEvent(new Event('dentastock-session-changed'))
+      toast('Operateur supprime.', 'success')
+    } catch (err) {
+      toast(err.message || 'Impossible de supprimer l operateur.', 'error')
     }
   }
 
@@ -565,6 +731,243 @@ export default function Parametres() {
             )}
           </>
         )}
+      </div>
+
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 space-y-5">
+        <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Operateurs et droits</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Chaque operateur a son numero de reference, son code PIN, son statut et ses droits. L operateur connecte apparait en haut de l application pour la tracabilite.
+            </p>
+            {!canManageOperators && (
+              <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                Votre session peut consulter les operateurs, mais seule une session avec le droit <span className="font-medium">Gestion operateurs</span> peut les modifier.
+              </div>
+            )}
+          </div>
+          <div className="rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-300">
+            Operateur connecte :
+            <span className="text-white font-medium ml-2">
+              {currentSession?.operator?.nom_complet || 'Aucun'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_420px] gap-5">
+          <div className="rounded-xl border border-slate-700 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-700 text-xs font-medium text-slate-400 uppercase tracking-wide">
+              Operateurs du cabinet
+            </div>
+            <div className="divide-y divide-slate-700/50">
+              {profiles.length === 0 ? (
+                <div className="px-4 py-8 text-center text-slate-500 text-sm">Aucun operateur configure.</div>
+              ) : (
+                profiles.map(profile => (
+                  <div key={profile.id} className="px-4 py-4 flex flex-col gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-medium text-white">{profile.nom_complet || profile.nom}</div>
+                        {Number(profile.id) === Number(currentSession?.operator?.id || 0) && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase bg-emerald-500/15 text-emerald-300">
+                            Connecte
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${
+                          profile.statut === 'ACTIF' ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'
+                        }`}>
+                          {profile.statut}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${
+                          profile.role === 'ADMIN'
+                            ? 'bg-sky-500/15 text-sky-300'
+                            : profile.role === 'LECTURE'
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'bg-slate-700 text-slate-300'
+                        }`}>
+                          {PROFILE_ROLE_OPTIONS.find(option => option.value === profile.role)?.label || profile.role}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Ref. {profile.reference_code} - {PROFILE_ROLE_OPTIONS.find(option => option.value === profile.role)?.hint || 'Operateur standard'}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                        {PERMISSION_OPTIONS.map(permission => (
+                          <div key={permission.key} className={`text-[11px] rounded-lg px-2.5 py-2 border ${
+                            profile.permissions?.[permission.key]
+                              ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                              : 'border-slate-700 bg-slate-900/60 text-slate-500'
+                          }`}>
+                            {permission.label}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => editProfile(profile)}
+                        disabled={!canManageOperators}
+                        className="text-xs text-sky-300 hover:text-sky-200 bg-sky-500/10 hover:bg-sky-500/20 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Modifier
+                      </button>
+                      <button
+                        onClick={() => void deleteProfile(profile)}
+                        disabled={!canManageOperators}
+                        className="text-xs text-red-300 hover:text-red-200 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Supprimer
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-5 space-y-4">
+            <div>
+              <div className="text-sm font-medium text-white">
+                {editingProfileId ? 'Modifier un operateur' : 'Ajouter un operateur'}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                La connexion se fait ensuite avec le numero de reference et le code PIN a 4 chiffres.
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Nom *</label>
+                <input
+                  type="text"
+                  value={profileForm.nom}
+                  onChange={e => setProfileForm(current => ({ ...current, nom: e.target.value }))}
+                  disabled={!canManageOperators}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="Ex: Martin"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Prenom</label>
+                <input
+                  type="text"
+                  value={profileForm.prenom}
+                  onChange={e => setProfileForm(current => ({ ...current, prenom: e.target.value }))}
+                  disabled={!canManageOperators}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="Ex: Claire"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Numero de ref *</label>
+                <input
+                  type="text"
+                  value={profileForm.reference_code}
+                  onChange={e => setProfileForm(current => ({ ...current, reference_code: e.target.value.replace(/\D/g, '') }))}
+                  disabled={!canManageOperators}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="Ex: 1"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Code PIN {editingProfileId ? '(laisser vide pour garder)' : '*'}</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={profileForm.pin}
+                  onChange={e => setProfileForm(current => ({ ...current, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                  disabled={!canManageOperators}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="0000"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Statut</label>
+                <select
+                  value={profileForm.statut}
+                  onChange={e => setProfileForm(current => ({ ...current, statut: e.target.value }))}
+                  disabled={!canManageOperators}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="ACTIF">Actif</option>
+                  <option value="INACTIF">Inactif</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Role</label>
+              <select
+                value={profileForm.role}
+                onChange={e => {
+                  const nextRole = e.target.value
+                  setProfileForm(current => ({
+                    ...current,
+                    role: nextRole,
+                    permissions: buildDefaultPermissions(nextRole),
+                  }))
+                }}
+                disabled={!canManageOperators}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {PROFILE_ROLE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <div className="text-xs text-slate-500 mt-2">
+                {PROFILE_ROLE_OPTIONS.find(option => option.value === profileForm.role)?.hint}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-slate-400 mb-3">Droits operateur</div>
+              <div className="space-y-2">
+                {PERMISSION_OPTIONS.map(permission => (
+                  <label key={permission.key} className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(profileForm.permissions?.[permission.key])}
+                      onChange={e => setProfileForm(current => ({
+                        ...current,
+                        permissions: {
+                          ...current.permissions,
+                          [permission.key]: e.target.checked,
+                        },
+                      }))}
+                      disabled={!canManageOperators}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <div className="text-sm text-white">{permission.label}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{permission.hint}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={resetProfileForm}
+                disabled={!canManageOperators}
+                className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={saveProfile}
+                disabled={!canManageOperators || savingProfile || !profileForm.nom.trim() || !profileForm.reference_code.trim() || (!editingProfileId && profileForm.pin.length !== 4)}
+                className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+              >
+                {savingProfile ? 'Enregistrement...' : editingProfileId ? 'Mettre a jour' : 'Ajouter'}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">

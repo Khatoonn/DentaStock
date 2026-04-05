@@ -11,6 +11,7 @@ const SHORTCUTS = [
   { key: '7', path: '/documents' },
   { key: '8', path: '/statistiques' },
   { key: '9', path: '/parametres' },
+  { key: '0', path: '/journal' },
 ]
 
 export default function KeyboardShortcuts() {
@@ -34,6 +35,11 @@ export default function KeyboardShortcuts() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault()
         navigate('/produits')
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        navigate('/journal')
       }
     }
 

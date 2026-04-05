@@ -61,6 +61,12 @@ const DEMO_SYSTEM = {
   lastIntegrityCheck: { backupName: 'dentastock-weekly-2026-W14.db.gz', checkedAt: '2026-04-03T08:20:00.000Z', ok: true, issues: [] },
 }
 
+const DEMO_AUDIT = [
+  { id: 1, module: 'COMMANDES', summary: 'Commande CMD-2026-041 enregistree.', actor_name: 'Claire', created_at: '2026-04-05 08:48:00' },
+  { id: 2, module: 'PRODUITS', summary: 'Fiche produit "Gants nitrile M" mise a jour.', actor_name: 'Administrateur', created_at: '2026-04-05 09:12:00' },
+  { id: 3, module: 'RECEPTIONS', summary: 'Reception partielle ajoutee a BL-2026-122.', actor_name: 'Claire', created_at: '2026-04-04 16:15:00' },
+]
+
 const moneyFormatter = new Intl.NumberFormat('fr-FR', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -120,6 +126,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [monthly, setMonthly] = useState([])
   const [systemHealth, setSystemHealth] = useState(null)
+  const [recentAudit, setRecentAudit] = useState([])
   const [loading, setLoading] = useState(true)
   const [runningAutoBackup, setRunningAutoBackup] = useState(false)
   const [verifyingIntegrity, setVerifyingIntegrity] = useState(false)
@@ -164,9 +171,11 @@ export default function Dashboard() {
       Promise.all([
         window.api.statsDashboard(),
         window.api.statsMonthly(),
-      ]).then(([s, m]) => {
+        window.api.auditList ? window.api.auditList({ limit: 5 }) : Promise.resolve([]),
+      ]).then(([s, m, auditRows]) => {
         setStats(s)
         setMonthly(m)
+        setRecentAudit(auditRows || [])
       }).finally(() => setLoading(false))
       void loadSystemHealth()
       interval = setInterval(() => {
@@ -177,6 +186,7 @@ export default function Dashboard() {
         setStats(DEMO_STATS)
         setMonthly(DEMO_MONTHLY)
         setSystemHealth(DEMO_SYSTEM)
+        setRecentAudit(DEMO_AUDIT)
         setLoading(false)
       }, 300)
     }
@@ -602,6 +612,37 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden min-w-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 gap-3">
+          <h2 className="font-semibold text-white text-sm">Dernieres actions</h2>
+          <button
+            onClick={() => navigate('/journal')}
+            className="text-xs text-orange-300 hover:text-orange-200 bg-orange-500/10 hover:bg-orange-500/20 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Ouvrir le journal
+          </button>
+        </div>
+        <div className="divide-y divide-slate-700/50">
+          {recentAudit.length === 0 ? (
+            <div className="px-5 py-8 text-center text-slate-500 text-sm">Aucune action recente</div>
+          ) : (
+            recentAudit.map(entry => (
+              <div key={entry.id} className="px-5 py-3 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm text-white truncate" title={entry.summary}>{entry.summary}</div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {entry.module || 'Journal'}{entry.actor_name ? ` - ${entry.actor_name}` : ''}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500 shrink-0 whitespace-nowrap">
+                  {formatDateTime(entry.created_at)}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   )

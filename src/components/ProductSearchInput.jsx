@@ -30,16 +30,25 @@ export default function ProductSearchInput({ produits, value, onChange, placehol
   }, [value, selected, open])
 
   // Filter produits by query
-  const filtered = query.trim()
-    ? produits.filter(p => {
-        const q = query.toLowerCase()
-        return (
-          (p.nom || '').toLowerCase().includes(q) ||
-          (p.reference || '').toLowerCase().includes(q) ||
-          (p.code_barre || '').toLowerCase().includes(q)
-        )
-      }).slice(0, 15)
+  const normalizedQuery = query.trim().toLowerCase()
+  const filtered = normalizedQuery
+    ? produits
+        .filter(p => (
+          (p.nom || '').toLowerCase().includes(normalizedQuery) ||
+          (p.reference || '').toLowerCase().includes(normalizedQuery) ||
+          (p.code_barre || '').toLowerCase().includes(normalizedQuery)
+        ))
+        .sort((left, right) => {
+          const leftExact = [left.nom, left.reference, left.code_barre].filter(Boolean).some(value => value.toLowerCase() === normalizedQuery) ? 1 : 0
+          const rightExact = [right.nom, right.reference, right.code_barre].filter(Boolean).some(value => value.toLowerCase() === normalizedQuery) ? 1 : 0
+          return rightExact - leftExact
+        })
+        .slice(0, 15)
     : produits.slice(0, 15)
+
+  const exactMatch = normalizedQuery
+    ? produits.find(p => [p.nom, p.reference, p.code_barre].filter(Boolean).some(value => value.toLowerCase() === normalizedQuery))
+    : null
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -72,7 +81,11 @@ export default function ProductSearchInput({ produits, value, onChange, placehol
       setHighlightIdx(i => Math.max(i - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      if (filtered[highlightIdx]) selectProduct(filtered[highlightIdx])
+      if (exactMatch) {
+        selectProduct(exactMatch)
+      } else if (filtered[highlightIdx]) {
+        selectProduct(filtered[highlightIdx])
+      }
     } else if (e.key === 'Escape') {
       setOpen(false)
       // Restore display
@@ -126,6 +139,7 @@ export default function ProductSearchInput({ produits, value, onChange, placehol
             >
               <span className="font-medium">{p.nom}</span>
               {p.reference && <span className="text-slate-500 ml-2">({p.reference})</span>}
+              {p.code_barre && <span className="text-slate-600 ml-2">[{p.code_barre}]</span>}
               {p.stock_actuel !== undefined && (
                 <span className={`text-xs ml-2 ${p.stock_actuel <= (p.stock_minimum || 0) ? 'text-red-400' : 'text-slate-500'}`}>
                   Stock: {p.stock_actuel}

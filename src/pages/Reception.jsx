@@ -304,6 +304,7 @@ export default function Reception() {
   const [produits, setProduits] = useState([])
   const [commandes, setCommandes] = useState([])
   const [receptions, setReceptions] = useState([])
+  const [commandeAdvisor, setCommandeAdvisor] = useState(null)
 
   const [commandeForm, setCommandeForm] = useState(createEmptyCommandeForm)
   const [receptionForm, setReceptionForm] = useState(createEmptyReceptionForm)
@@ -327,17 +328,19 @@ export default function Reception() {
   const [partialAlert, setPartialAlert] = useState(null)
 
   const load = async () => {
-    const [nextFournisseurs, nextProduits, nextCommandes, nextReceptions] = await Promise.all([
+    const [nextFournisseurs, nextProduits, nextCommandes, nextReceptions, nextAdvisor] = await Promise.all([
       window.api.fournisseursList(),
       window.api.produitsList(),
       window.api.commandesList(),
       window.api.receptionsList(),
+      window.api.commandesAdvisor ? window.api.commandesAdvisor() : Promise.resolve(null),
     ])
 
     setFournisseurs(nextFournisseurs)
     setProduits(nextProduits)
     setCommandes(nextCommandes)
     setReceptions(nextReceptions)
+    setCommandeAdvisor(nextAdvisor || [])
   }
 
   useEffect(() => {
@@ -357,6 +360,46 @@ export default function Reception() {
   useEffect(() => {
     if (stage === 'RETOURS') loadRetours()
   }, [stage])
+
+  useEffect(() => {
+    const handler = event => {
+      if (!(event.ctrlKey || event.metaKey)) return
+
+      const key = event.key.toLowerCase()
+
+      if (key === 'enter') {
+        if (showCommandeForm) {
+          event.preventDefault()
+          void saveCommande()
+        } else if (showReceptionForm) {
+          event.preventDefault()
+          void saveReception()
+        } else if (showRetourForm) {
+          event.preventDefault()
+          void saveRetour()
+        }
+        return
+      }
+
+      if (!event.shiftKey) return
+
+      if (key === 'a') {
+        event.preventDefault()
+        if (showCommandeForm) addCommandeItem()
+        else if (showReceptionForm) addReceptionItem()
+        else if (showRetourForm) addRetourItem()
+      } else if (key === 'n') {
+        event.preventDefault()
+        openNewCommande()
+      } else if (key === 'r') {
+        event.preventDefault()
+        openManualReception()
+      }
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [showCommandeForm, showReceptionForm, showRetourForm, commandeForm, receptionForm, retourForm])
 
   // Load remises when fournisseur changes in commande form
   useEffect(() => {
@@ -447,10 +490,11 @@ export default function Reception() {
             produit_id: product.id,
             quantite: Math.max(
               1,
-              Number(product.quantite_conseillee || 0) ||
+              Number(product.quantite_a_commander || 0) ||
+                Number(product.quantite_conseillee || 0) ||
                 (Number(product.stock_minimum || 0) - Number(product.stock_actuel || 0))
             ),
-            prix_unitaire: Number(product.prix_unitaire || 0),
+            prix_unitaire: Number(product.prix_reference || 0) || Number(product.prix_unitaire || 0),
           }]
         : [],
     })
@@ -779,6 +823,10 @@ export default function Reception() {
   }, 0)
 
   const produitsACommander = useMemo(() => {
+    if (isElectron && Array.isArray(commandeAdvisor)) {
+      return commandeAdvisor
+    }
+
     return produits
       .filter(produit => Number(produit.stock_actuel || 0) <= Number(produit.stock_minimum || 0))
       .map(produit => {
@@ -800,7 +848,7 @@ export default function Reception() {
         const rightGap = Number(right.stock_actuel || 0) - Number(right.stock_minimum || 0)
         return leftGap - rightGap
       })
-  }, [produits])
+  }, [commandeAdvisor, produits])
 
   const commandesEnAttente = useMemo(() => {
     return commandes.filter(commande => ['EN_ATTENTE', 'PARTIELLE'].includes(commande.statut))
@@ -809,6 +857,42 @@ export default function Reception() {
   const budgetConseille = useMemo(() => {
     return produitsACommander.reduce((sum, produit) => sum + Number(produit.montant_estime || 0), 0)
   }, [produitsACommander])
+
+  const conseilsParFournisseur = useMemo(() => {
+    return Object.values(produitsACommander.reduce((groups, produit) => {
+      const supplierKey = String(produit.fournisseur_id || 'sans-fournisseur')
+      if (!groups[supplierKey]) {
+        groups[supplierKey] = {
+          fournisseur_id: produit.fournisseur_id || null,
+          fournisseur_nom: produit.fournisseur_nom || 'Sans fournisseur',
+          produits: [],
+          budget: 0,
+          total_lignes: 0,
+        }
+      }
+
+      groups[supplierKey].produits.push(produit)
+      groups[supplierKey].budget += Number(produit.montant_estime || 0)
+      groups[supplierKey].total_lignes += 1
+      return groups
+    }, {})).sort((left, right) => right.budget - left.budget)
+  }, [produitsACommander])
+
+  const openSuggestedCommandeForSupplier = supplierGroup => {
+    if (!supplierGroup) return
+
+    openNewCommande()
+    setCommandeForm({
+      ...createEmptyCommandeForm(),
+      fournisseur_id: Number(supplierGroup.fournisseur_id || '') || '',
+      notes: 'Commande preparee depuis les conseils de commande.',
+      items: supplierGroup.produits.map(produit => ({
+        produit_id: produit.id,
+        quantite: Math.max(1, Number(produit.quantite_a_commander || produit.quantite_conseillee || 0)),
+        prix_unitaire: Number(produit.prix_reference || produit.prix_unitaire || 0),
+      })),
+    })
+  }
 
   const archiveCutoffDate = useMemo(() => {
     const nextDate = new Date()
@@ -1023,6 +1107,10 @@ export default function Reception() {
             )}
           </div>
 
+          <div className="text-xs text-slate-500">
+            Saisie rapide : <span className="font-mono">Ctrl+Enter</span> pour enregistrer, <span className="font-mono">Ctrl+Maj+A</span> pour ajouter une ligne.
+          </div>
+
           <div className="flex items-center justify-end gap-3 pt-2">
             <button onClick={closeCommandeForm} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">Annuler</button>
             <button onClick={saveCommande} disabled={savingCommande || !commandeForm.fournisseur_id || commandeForm.items.length === 0} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
@@ -1165,6 +1253,10 @@ export default function Reception() {
             </div>
           </div>
 
+          <div className="text-xs text-slate-500">
+            Saisie rapide : <span className="font-mono">Ctrl+Enter</span> pour enregistrer, <span className="font-mono">Ctrl+Maj+A</span> pour ajouter une ligne, <span className="font-mono">Ctrl+Maj+R</span> pour ouvrir une reception manuelle.
+          </div>
+
           <div className="flex items-center justify-end gap-3 pt-2">
             <button onClick={closeReceptionForm} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">Annuler</button>
             <button onClick={saveReception} disabled={savingReception || !receptionForm.fournisseur_id || receptionForm.items.length === 0} className="flex items-center gap-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
@@ -1251,17 +1343,48 @@ export default function Reception() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                {conseilsParFournisseur.length === 0 ? (
+                  <div className="xl:col-span-3 rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-6 text-center text-sm text-slate-500">
+                    Aucun regroupement fournisseur a proposer pour le moment.
+                  </div>
+                ) : (
+                  conseilsParFournisseur.map(group => (
+                    <div key={group.fournisseur_id || group.fournisseur_nom} className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">{group.fournisseur_nom}</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {group.total_lignes} produit{group.total_lignes > 1 ? 's' : ''} conseille{group.total_lignes > 1 ? 's' : ''}
+                        </div>
+                      </div>
+                      <div className="text-sm text-slate-300">
+                        Budget estime : <span className="font-semibold text-emerald-300 tabular-nums">{formatMoney(group.budget)}</span>
+                      </div>
+                      <button
+                        onClick={() => openSuggestedCommandeForSupplier(group)}
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                      >
+                        Preparer toute la commande
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
               <div className="overflow-x-auto rounded-lg border border-slate-700">
-                <table className="w-full min-w-[940px] xl:min-w-[1080px] table-fixed text-sm">
+                <table className="w-full min-w-[1120px] xl:min-w-[1240px] table-fixed text-sm">
                   <colgroup>
-                    <col style={{ width: '26%' }} />
-                    <col style={{ width: '15%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '11%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '23%' }} />
+                    <col style={{ width: '13%' }} />
                     <col style={{ width: '8%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '6%' }} />
                   </colgroup>
                   <thead className="bg-slate-750">
                     <tr className="text-xs font-medium text-slate-400 border-b border-slate-700">
@@ -1269,8 +1392,11 @@ export default function Reception() {
                       <th className="text-left py-3 px-3">Fournisseur</th>
                       <th className="text-right py-3 px-3">Stock</th>
                       <th className="text-right py-3 px-3">Seuil</th>
+                      <th className="text-right py-3 px-3">En attente</th>
                       <th className="text-right py-3 px-3">Mini</th>
                       <th className="text-right py-3 px-3">Conseil</th>
+                      <th className="text-right py-3 px-3">Couverture</th>
+                      <th className="text-right py-3 px-3">Dernier prix</th>
                       <th className="text-right py-3 px-3">Estime</th>
                       <th className="text-center py-3 px-3">Action</th>
                     </tr>
@@ -1278,7 +1404,7 @@ export default function Reception() {
                   <tbody className="divide-y divide-slate-700/50 bg-slate-800">
                     {produitsACommander.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="text-center py-10 text-slate-500">Aucun conseil de commande pour le moment.</td>
+                        <td colSpan={11} className="text-center py-10 text-slate-500">Aucun conseil de commande pour le moment.</td>
                       </tr>
                     ) : (
                       produitsACommander.map(produit => (
@@ -1290,8 +1416,20 @@ export default function Reception() {
                           <td className="py-3 px-3 text-slate-300">{produit.fournisseur_nom || 'A renseigner'}</td>
                           <td className="py-3 px-3 text-right text-red-300 whitespace-nowrap tabular-nums">{Number(produit.stock_actuel || 0)}</td>
                           <td className="py-3 px-3 text-right text-slate-300 whitespace-nowrap tabular-nums">{Number(produit.stock_minimum || 0)}</td>
+                          <td className="py-3 px-3 text-right text-sky-300 whitespace-nowrap tabular-nums">{Number(produit.quantite_en_attente || 0)}</td>
                           <td className="py-3 px-3 text-right text-amber-300 whitespace-nowrap tabular-nums">{produit.quantite_minimum}</td>
-                          <td className="py-3 px-3 text-right text-emerald-300 whitespace-nowrap tabular-nums">{produit.quantite_conseillee}</td>
+                          <td className="py-3 px-3 text-right text-emerald-300 whitespace-nowrap tabular-nums">{produit.quantite_a_commander || produit.quantite_conseillee}</td>
+                          <td className="py-3 px-3 text-right text-slate-300 whitespace-nowrap tabular-nums">
+                            {Number.isFinite(produit.couverture_jours) ? `${produit.couverture_jours} j` : '-'}
+                          </td>
+                          <td className="py-3 px-3 text-right whitespace-nowrap tabular-nums">
+                            <div className="text-white">{produit.prix_dernier ? formatMoney(produit.prix_dernier) : '-'}</div>
+                            {Number.isFinite(produit.variation_prix_pct) && (
+                              <div className={`text-[10px] ${produit.variation_prix_pct > 10 ? 'text-red-300' : produit.variation_prix_pct < -10 ? 'text-emerald-300' : 'text-slate-500'}`}>
+                                {produit.variation_prix_pct > 0 ? '+' : ''}{produit.variation_prix_pct}%
+                              </div>
+                            )}
+                          </td>
                           <td className="py-3 px-3 text-right text-white whitespace-nowrap tabular-nums">{formatMoney(produit.montant_estime)}</td>
                           <td className="py-3 px-3 text-center">
                             <button onClick={() => openNewCommande(produit)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">

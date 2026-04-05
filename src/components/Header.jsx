@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTheme } from '../ThemeContext'
 import GlobalSearch from './GlobalSearch'
+import { useToast } from './Toast'
 
 const titles = {
   '/dashboard': { label: 'Tableau de bord', desc: 'Vue generale du stock et des activites' },
@@ -13,14 +15,23 @@ const titles = {
   '/fournisseurs': { label: 'Fournisseurs', desc: 'Gerer les fournisseurs et leurs contacts' },
   '/praticiens': { label: 'Praticiens', desc: 'Gerer les praticiens du cabinet' },
   '/statistiques': { label: 'Statistiques', desc: 'Graphiques et indicateurs de performance' },
+  '/journal': { label: 'Journal', desc: 'Historique des actions et modifications' },
   '/parametres': { label: 'Parametres', desc: 'Configurer le stockage partage et les archives' },
 }
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
+const ROLE_LABELS = {
+  ADMIN: 'Admin',
+  EQUIPE: 'Equipe',
+  LECTURE: 'Lecture',
+}
 
 export default function Header() {
   const location = useLocation()
   const { theme, toggle } = useTheme()
+  const { toast } = useToast()
+  const [session, setSession] = useState(null)
+  const [disconnecting, setDisconnecting] = useState(false)
   const info = titles[location.pathname] || { label: 'DentaStock', desc: '' }
   const now = new Date()
   const dateStr = now.toLocaleDateString('fr-FR', {
@@ -29,6 +40,35 @@ export default function Header() {
     month: 'long',
     year: 'numeric',
   })
+
+  useEffect(() => {
+    if (!isElectron || !window.api.authGetSession) return
+
+    let cancelled = false
+
+    const loadSession = async () => {
+      try {
+        const currentSession = await window.api.authGetSession()
+
+        if (!cancelled) {
+          setSession(currentSession || null)
+        }
+      } catch {
+        if (!cancelled) {
+          setSession(null)
+        }
+      }
+    }
+
+    void loadSession()
+    const refresh = () => void loadSession()
+    window.addEventListener('dentastock-session-changed', refresh)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('dentastock-session-changed', refresh)
+    }
+  }, [])
 
   return (
     <header className="drag-region flex items-center justify-between px-6 py-3 bg-slate-800 border-b border-slate-700 shrink-0">
@@ -39,6 +79,43 @@ export default function Header() {
 
       <div className="no-drag flex items-center gap-4">
         <GlobalSearch />
+        {session?.operator && (
+          <div className="hidden xl:flex items-center gap-2 min-w-0">
+            <span className="text-xs text-slate-500 whitespace-nowrap">Operateur connecte</span>
+            <div className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-xs text-white max-w-[260px] truncate">
+              {session.operator.nom_complet || session.operator.nom} (ref. {session.operator.reference_code})
+            </div>
+            {session.operator && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase whitespace-nowrap ${
+                session.operator.role === 'ADMIN'
+                  ? 'bg-sky-500/15 text-sky-300'
+                  : session.operator.role === 'LECTURE'
+                    ? 'bg-amber-500/15 text-amber-300'
+                    : 'bg-emerald-500/15 text-emerald-300'
+              }`}>
+                {ROLE_LABELS[session.operator.role] || session.operator.role}
+              </span>
+            )}
+            <button
+              onClick={async () => {
+                if (!isElectron || !window.api.authLogout) return
+                setDisconnecting(true)
+                try {
+                  await window.api.authLogout()
+                  window.dispatchEvent(new Event('dentastock-session-changed'))
+                  toast('Operateur deconnecte.', 'success')
+                } catch (error) {
+                  toast(error?.message || 'Impossible de se deconnecter.', 'error')
+                } finally {
+                  setDisconnecting(false)
+                }
+              }}
+              className="text-xs text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              {disconnecting ? 'Deconnexion...' : 'Se deconnecter'}
+            </button>
+          </div>
+        )}
         <span className="text-xs text-slate-400 capitalize">{dateStr}</span>
 
         <button

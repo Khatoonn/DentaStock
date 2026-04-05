@@ -2,22 +2,24 @@
 
 Application de gestion de stock pour cabinet dentaire, multi-postes en reseau local (serveur/client).
 
-**[Telecharger l'installateur Windows (v2.4.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.4.0)**
+**[Telecharger l'installateur Windows (v2.5.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.5.0)**
 
 ## Fonctionnalites
 
-- **Tableau de bord** — Vue d'ensemble avec KPIs, alertes stock, alertes peremption (produits + lots), commandes en cours, depenses mensuelles, sante du systeme (mode poste, etat serveur, replica, derniere sauvegarde, mode lecture/ecriture)
-- **Commandes & Receptions** — Cycle complet : creation de commande, commande automatique, reception partielle/totale, tracabilite des lots, bouton "Tout receptionne" / "Reception complete", alerte reception incomplete (choix partielle ou ajustement commande)
-- **Export PDF bon de commande** — Generation de bons de commande professionnels en PDF (en-tete cabinet, coordonnees fournisseur, tableau produits)
+- **Tableau de bord** — Vue d'ensemble avec KPIs, alertes stock, alertes peremption (produits + lots), commandes en cours, depenses mensuelles, sante du systeme
+- **Profils et operateurs** — Gestion des utilisateurs avec roles (Admin, Equipe, Lecture seule), permissions granulaires et authentification par code PIN
+- **Journal d'audit** — Tracabilite complete de toutes les actions effectuees dans l'application
+- **Commandes & Receptions** — Cycle complet : creation, commande automatique, reception partielle/totale, tracabilite des lots, alerte reception incomplete, conseiller de commande
+- **Export PDF bon de commande** — Generation de bons de commande professionnels en PDF
 - **Produits & Stock** — Catalogue avec categories, code-barres EAN, peremption, seuils intelligents, historique des prix, pagination
-- **Inventaire physique** — Onglet dedie pour comparer stock theorique vs reel et appliquer les ajustements en lot
-- **Retours fournisseur** — Enregistrement des retours (defectueux, perimes, rappel fabricant) avec deduction automatique du stock
-- **Consommation** — Saisie par soin et praticien, avec recherche par autocompletion (nom, reference, code-barres) et templates
+- **Inventaire physique** — Comparaison stock theorique vs reel avec ajustements en lot
+- **Retours fournisseur** — Enregistrement des retours avec deduction automatique du stock
+- **Consommation** — Saisie par soin et praticien, autocompletion (nom, reference, code-barres), templates
 - **Fournisseurs** — Gestion avec coordonnees, remises par palier de quantite
-- **Praticiens** — Gestion des praticiens avec archivage/restauration
-- **Statistiques** — Graphiques interactifs : depenses, top produits, repartition par categorie, alertes peremption par lot
+- **Praticiens** — Gestion avec archivage/restauration
+- **Statistiques** — Graphiques interactifs : depenses, top produits, repartition par categorie, alertes peremption
 - **Documents / GED** — Archivage structure des BL et factures, preview integre, export
-- **Export CSV** — Export de toutes les donnees (produits, commandes, consommations, fournisseurs) compatible Excel
+- **Export CSV** — Export de toutes les donnees compatible Excel
 - **Recherche globale** — Ctrl+K pour trouver produits, fournisseurs, commandes depuis n'importe quel ecran
 - **Notifications Windows** — Alertes automatiques au demarrage (stock bas, peremptions proches)
 - **Theme clair / sombre** — Basculer via le bouton dans le header
@@ -31,6 +33,13 @@ Application de gestion de stock pour cabinet dentaire, multi-postes en reseau lo
 
 - **Mode Serveur** — Le poste principal stocke la base de donnees localement. Le dossier est partage sur le reseau Windows.
 - **Mode Client** — Les postes secondaires se connectent au dossier partage. Replique locale synchronisee automatiquement.
+
+### Securite et acces
+
+- Profils operateur avec 3 niveaux de role : Administrateur, Equipe, Lecture seule
+- 10 permissions granulaires (commandes, stock, fournisseurs, praticiens, parametres...)
+- Authentification par code PIN a 4 chiffres (hash SHA-256)
+- Journal d'audit avec tracabilite de toutes les actions
 
 ### Sauvegardes automatiques
 
@@ -68,7 +77,7 @@ npm run dev
 npm run pack
 ```
 
-Genere `dist/DentaStock Setup 2.4.0.exe`
+Genere `dist/DentaStock Setup 2.5.0.exe`
 
 ### Base de demonstration
 
