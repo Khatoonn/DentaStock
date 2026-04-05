@@ -324,6 +324,7 @@ export default function Reception() {
   const [showRetourForm, setShowRetourForm] = useState(false)
   const [retourForm, setRetourForm] = useState({ date: new Date().toISOString().split('T')[0], fournisseur_id: '', motif: '', notes: '', items: [] })
   const [savingRetour, setSavingRetour] = useState(false)
+  const [partialAlert, setPartialAlert] = useState(null)
 
   const load = async () => {
     const [nextFournisseurs, nextProduits, nextCommandes, nextReceptions] = await Promise.all([
@@ -660,14 +661,29 @@ export default function Reception() {
     }
   }
 
-  const saveReception = async () => {
-    if (!receptionForm.date || !receptionForm.fournisseur_id || receptionForm.items.length === 0) return
-    if (receptionForm.items.some(item => !item.produit_id || Number(item.quantite) <= 0)) return
-
+  const doSaveReception = async (adjustCommande = false) => {
     setSavingReception(true)
     setError('')
+    setPartialAlert(null)
 
     try {
+      if (adjustCommande && receptionForm.commande_id && !editingReceptionId) {
+        const commande = await window.api.commandesGet(receptionForm.commande_id)
+        if (commande) {
+          const updatedItems = (commande.items || []).map(ci => {
+            const receptionItem = receptionForm.items.find(ri => ri.produit_id === ci.produit_id)
+            const alreadyReceived = Number(ci.quantite_recue || 0)
+            const nowReceiving = receptionItem ? Number(receptionItem.quantite || 0) : 0
+            return { ...ci, quantite: alreadyReceived + nowReceiving }
+          }).filter(ci => Number(ci.quantite || 0) > 0)
+
+          await window.api.commandesUpdate(commande.id, {
+            ...commande,
+            items: updatedItems,
+          })
+        }
+      }
+
       if (editingReceptionId) {
         await window.api.receptionsUpdate(editingReceptionId, receptionForm)
       } else {
@@ -679,9 +695,11 @@ export default function Reception() {
       toast(
         editingReceptionId
           ? 'Reception mise a jour.'
-          : receptionForm.append_to_reception_id
-            ? 'Reception partielle ajoutee a la reception existante.'
-            : 'Reception enregistree et stock mis a jour.',
+          : adjustCommande
+            ? 'Reception enregistree — commande ajustee aux quantites recues.'
+            : receptionForm.append_to_reception_id
+              ? 'Reception partielle ajoutee a la reception existante.'
+              : 'Reception enregistree et stock mis a jour.',
         'success'
       )
       setStage('RECEPTIONNEES')
@@ -690,6 +708,44 @@ export default function Reception() {
     } finally {
       setSavingReception(false)
     }
+  }
+
+  const saveReception = async () => {
+    if (!receptionForm.date || !receptionForm.fournisseur_id || receptionForm.items.length === 0) return
+    if (receptionForm.items.some(item => !item.produit_id || Number(item.quantite) <= 0)) return
+
+    if (receptionForm.commande_id && !editingReceptionId) {
+      try {
+        const commande = await window.api.commandesGet(receptionForm.commande_id)
+        if (commande) {
+          const incomplete = []
+          for (const ci of commande.items || []) {
+            const alreadyReceived = Number(ci.quantite_recue || 0)
+            const ordered = Number(ci.quantite || 0)
+            const remaining = ordered - alreadyReceived
+            const ri = receptionForm.items.find(r => r.produit_id === ci.produit_id)
+            const receiving = ri ? Number(ri.quantite || 0) : 0
+            if (receiving < remaining) {
+              const produit = produits.find(p => p.id === ci.produit_id)
+              incomplete.push({
+                nom: produit?.nom || `Produit #${ci.produit_id}`,
+                commandee: remaining,
+                recue: receiving,
+              })
+            }
+          }
+
+          if (incomplete.length > 0) {
+            setPartialAlert({ incomplete })
+            return
+          }
+        }
+      } catch (e) {
+        console.error('Erreur verification quantites:', e)
+      }
+    }
+
+    doSaveReception()
   }
 
   const updateCommandeStatus = async (commandeId, statut) => {
@@ -1589,6 +1645,78 @@ export default function Reception() {
                   <div className="text-xs text-slate-500 mt-2">Utilise Ouvrir ou Exporter pour consulter le fichier.</div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {partialAlert && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-white font-semibold text-base">Reception incomplete</h3>
+                <p className="text-slate-400 text-sm mt-1">Certains produits n'ont pas ete entierement recus :</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/50 rounded-lg border border-slate-700 max-h-48 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-500 text-xs border-b border-slate-700">
+                    <th className="text-left py-2 px-3 font-medium">Produit</th>
+                    <th className="text-right py-2 px-3 font-medium">Attendu</th>
+                    <th className="text-right py-2 px-3 font-medium">Recu</th>
+                    <th className="text-right py-2 px-3 font-medium">Manquant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {partialAlert.incomplete.map((item, i) => (
+                    <tr key={i} className="border-b border-slate-700/50">
+                      <td className="py-1.5 px-3 text-slate-300">{item.nom}</td>
+                      <td className="py-1.5 px-3 text-right text-slate-400 tabular-nums">{item.commandee}</td>
+                      <td className="py-1.5 px-3 text-right text-amber-400 tabular-nums">{item.recue}</td>
+                      <td className="py-1.5 px-3 text-right text-red-400 tabular-nums">{item.commandee - item.recue}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-slate-400 text-sm">Que souhaitez-vous faire ?</p>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => doSaveReception(false)}
+                disabled={savingReception}
+                className="w-full flex items-center gap-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                Reception partielle — je recevrai le reste plus tard
+              </button>
+              <button
+                onClick={() => doSaveReception(true)}
+                disabled={savingReception}
+                className="w-full flex items-center gap-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Modifier la commande — ajuster les quantites a ce que j'ai recu
+              </button>
+              <button
+                onClick={() => setPartialAlert(null)}
+                className="w-full text-slate-400 hover:text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                Annuler
+              </button>
             </div>
           </div>
         </div>
