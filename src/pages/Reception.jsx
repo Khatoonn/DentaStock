@@ -970,24 +970,24 @@ export default function Reception() {
             </div>
 
             {(() => { const hasReceivedCol = editingCommandeId && commandeForm.items.some(i => Number(i.quantite_recue || 0) > 0); return (
-            <div className="overflow-x-auto rounded-lg border border-slate-700">
-              <table className="w-full min-w-[700px] table-fixed text-sm">
+            <div className="rounded-lg border border-slate-700">
+              <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                 <colgroup>
-                  <col className={hasReceivedCol ? 'w-[32%]' : 'w-[38%]'} />
-                  <col className="w-[7%]" />
-                  <col className="w-[11%]" />
-                  {hasReceivedCol && <col className="w-[11%]" />}
-                  <col className="w-[14%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[4%]" />
+                  <col style={{ width: hasReceivedCol ? '32%' : '38%' }} />
+                  <col style={{ width: '60px' }} />
+                  <col style={{ width: '90px' }} />
+                  {hasReceivedCol && <col style={{ width: '90px' }} />}
+                  <col style={{ width: '110px' }} />
+                  <col style={{ width: '100px' }} />
+                  <col style={{ width: '36px' }} />
                 </colgroup>
                 <thead className="bg-slate-750">
                   <tr className="text-xs font-medium text-slate-400 border-b border-slate-700">
                     <th className="text-left py-2 px-3">Produit</th>
                     <th className="text-left py-2 px-2">Unite</th>
-                    <th className="text-right py-2 px-2">Commande</th>
+                    <th className="text-right py-2 px-2">Qte</th>
                     {hasReceivedCol && <th className="text-center py-2 px-2">Recu</th>}
-                    <th className="text-right py-2 px-2">Prix unit. HT</th>
+                    <th className="text-right py-2 px-2">Prix HT</th>
                     <th className="text-right py-2 px-2">Total HT</th>
                     <th className="py-2" />
                   </tr>
@@ -1121,17 +1121,17 @@ export default function Reception() {
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-slate-700">
-              <table className="w-full min-w-[700px] table-fixed text-sm">
+            <div className="rounded-lg border border-slate-700">
+              <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                 <colgroup>
-                  <col className="w-[26%]" />
-                  <col className="w-[7%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[4%]" />
+                  <col style={{ width: '28%' }} />
+                  <col style={{ width: '60px' }} />
+                  <col style={{ width: '100px' }} />
+                  <col style={{ width: '100px' }} />
+                  <col style={{ width: '110px' }} />
+                  <col style={{ width: '120px' }} />
+                  <col style={{ width: '90px' }} />
+                  <col style={{ width: '36px' }} />
                 </colgroup>
                 <thead className="bg-slate-750">
                   <tr className="text-xs font-medium text-slate-400 border-b border-slate-700">
