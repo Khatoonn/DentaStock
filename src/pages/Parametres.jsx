@@ -30,6 +30,8 @@ export default function Parametres() {
   const [loading, setLoading] = useState(true)
   const { toast, confirm } = useToast()
   const [saving, setSaving] = useState(false)
+  const [runningAutoBackup, setRunningAutoBackup] = useState(false)
+  const [verifyingBackup, setVerifyingBackup] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -108,6 +110,38 @@ export default function Parametres() {
   }
 
   const sharedMode = status?.mode === 'shared'
+
+  const runAutoBackupNow = async () => {
+    if (!isElectron) return
+    setRunningAutoBackup(true)
+    try {
+      await window.api.backupRunAutoNow()
+      toast('Sauvegarde automatique lancee.', 'success')
+      await load()
+    } catch (err) {
+      toast(err.message || 'Impossible de lancer la sauvegarde automatique.', 'error')
+    } finally {
+      setRunningAutoBackup(false)
+    }
+  }
+
+  const verifyBackup = async (backupName = '') => {
+    if (!isElectron) return
+    setVerifyingBackup(backupName || '__latest__')
+    try {
+      const result = await window.api.backupVerifyIntegrity(backupName || null)
+      if (result?.ok) {
+        toast(`Integrite OK sur ${result.backupName}.`, 'success')
+      } else {
+        toast(`Probleme detecte sur ${result?.backupName || 'la sauvegarde'}.`, 'error')
+      }
+      await load()
+    } catch (err) {
+      toast(err.message || 'Impossible de verifier la sauvegarde.', 'error')
+    } finally {
+      setVerifyingBackup('')
+    }
+  }
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -344,6 +378,27 @@ export default function Parametres() {
 
         {backupInfo && (
           <>
+            {backupInfo.autoBackupOverdue && (
+              <div className={`rounded-xl border px-4 py-4 ${backupInfo.autoBackupWarningLevel === 'red' ? 'border-red-500/30 bg-red-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}>
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className={`text-sm font-semibold ${backupInfo.autoBackupWarningLevel === 'red' ? 'text-red-200' : 'text-amber-200'}`}>
+                      Sauvegarde automatique en retard
+                    </div>
+                    <div className={`text-sm mt-1 ${backupInfo.autoBackupWarningLevel === 'red' ? 'text-red-100' : 'text-amber-100'}`}>
+                      La derniere sauvegarde auto date de {backupInfo.autoBackupDelayDays ?? '?'} jour{backupInfo.autoBackupDelayDays > 1 ? 's' : ''}.
+                    </div>
+                  </div>
+                  <button
+                    onClick={runAutoBackupNow}
+                    disabled={!isElectron || runningAutoBackup}
+                    className={`shrink-0 text-sm font-medium px-4 py-2 rounded-lg transition-colors ${backupInfo.autoBackupWarningLevel === 'red' ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'} disabled:opacity-50`}
+                  >
+                    {runningAutoBackup ? 'Sauvegarde...' : 'Sauvegarder maintenant'}
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="text-xs text-slate-500">
               Les donnees metier ne sont plus purgees automatiquement. Les sauvegardes anciennes sont simplement retirees au fil de l eau.
             </div>
@@ -376,6 +431,48 @@ export default function Parametres() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Dernier controle d integrite</div>
+                <div className="text-sm font-medium text-white mt-2">
+                  {backupInfo.lastIntegrityCheck
+                    ? (backupInfo.lastIntegrityCheck.ok ? 'Integrite OK' : 'Probleme detecte')
+                    : 'Aucun controle lance'
+                  }
+                </div>
+                <div className="text-xs text-slate-400 mt-2 break-all">
+                  {backupInfo.lastIntegrityCheck
+                    ? `${new Date(backupInfo.lastIntegrityCheck.checkedAt).toLocaleString('fr-FR')} - ${backupInfo.lastIntegrityCheck.backupName}`
+                    : 'Utilisez le bouton ci-dessous pour verifier une sauvegarde sans la restaurer.'
+                  }
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 flex flex-col justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Test de restauration</div>
+                  <div className="text-sm text-slate-300 mt-2">
+                    Controle la sauvegarde la plus recente avec <span className="font-mono">PRAGMA integrity_check</span>, sans toucher a la base active.
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => verifyBackup()}
+                    disabled={!isElectron || verifyingBackup !== ''}
+                    className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {verifyingBackup === '__latest__' ? 'Verification...' : 'Verifier la plus recente'}
+                  </button>
+                  <button
+                    onClick={runAutoBackupNow}
+                    disabled={!isElectron || runningAutoBackup}
+                    className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {runningAutoBackup ? 'Sauvegarde...' : 'Lancer une sauvegarde auto'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {backupInfo.backups.length > 0 && (
               <div className="rounded-xl border border-slate-700 overflow-hidden">
                 <div className="px-4 py-3 border-b border-slate-700 text-xs font-medium text-slate-400">
@@ -401,6 +498,13 @@ export default function Parametres() {
                         className="text-xs text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 px-3 py-1 rounded-lg shrink-0"
                       >
                         Restaurer
+                      </button>
+                      <button
+                        onClick={() => verifyBackup(b.name)}
+                        disabled={!isElectron || verifyingBackup !== ''}
+                        className="text-xs text-emerald-300 hover:text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-50 px-3 py-1 rounded-lg shrink-0"
+                      >
+                        {verifyingBackup === b.name ? 'Verification...' : 'Verifier'}
                       </button>
                     </div>
                   ))}

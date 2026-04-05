@@ -394,6 +394,109 @@ function createAutomaticRestorePoint(prefix, date = new Date()) {
   return backupPath
 }
 
+function getIntegrityMetaPath() {
+  return path.join(getBackupDir(), 'last-integrity-check.json')
+}
+
+function readLastIntegrityCheck() {
+  const metaPath = getIntegrityMetaPath()
+  if (!fs.existsSync(metaPath)) return null
+
+  try {
+    return JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+function writeLastIntegrityCheck(payload) {
+  const backupDir = ensureDirectory(getBackupDir())
+  fs.writeFileSync(path.join(backupDir, 'last-integrity-check.json'), JSON.stringify(payload, null, 2), 'utf-8')
+}
+
+function listBackupFiles() {
+  const backupDir = getBackupDir()
+  if (!fs.existsSync(backupDir)) return []
+
+  return fs.readdirSync(backupDir)
+    .filter(name => name.startsWith('dentastock-') && name.endsWith('.db.gz'))
+    .map(name => {
+      const stats = fs.statSync(path.join(backupDir, name))
+      let type = 'manual'
+      if (name.startsWith('dentastock-weekly-')) type = 'weekly'
+      else if (name.startsWith('dentastock-monthly-')) type = 'monthly'
+      else if (name.startsWith('dentastock-before-')) type = 'restore-point'
+
+      return {
+        name,
+        type,
+        size: stats.size,
+        date: stats.mtime.toISOString(),
+      }
+    })
+    .sort((a, b) => b.date.localeCompare(a.date))
+}
+
+function getLatestAutoBackupInfo(referenceDate = new Date()) {
+  const candidates = [getLastWeeklyBackupDate(), getLastMonthlyBackupDate()].filter(Boolean)
+  if (candidates.length === 0) {
+    return {
+      latestAutoBackup: null,
+      autoBackupDelayDays: null,
+      autoBackupWarningLevel: 'red',
+      autoBackupOverdue: true,
+    }
+  }
+
+  const latest = candidates.sort((a, b) => b.getTime() - a.getTime())[0]
+  const delayDays = Math.floor((referenceDate.getTime() - latest.getTime()) / (1000 * 60 * 60 * 24))
+
+  return {
+    latestAutoBackup: latest.toISOString(),
+    autoBackupDelayDays: delayDays,
+    autoBackupWarningLevel: delayDays > 30 ? 'red' : delayDays > 14 ? 'amber' : 'green',
+    autoBackupOverdue: delayDays > 14,
+  }
+}
+
+function verifyBackupIntegrity(backupName) {
+  const backups = listBackupFiles()
+  const selectedBackup = backupName
+    ? backups.find(item => item.name === backupName)
+    : backups.find(item => item.type === 'weekly' || item.type === 'monthly') || backups[0]
+
+  if (!selectedBackup) {
+    throw new Error('Aucune sauvegarde disponible a verifier.')
+  }
+
+  const backupPath = path.join(getBackupDir(), selectedBackup.name)
+  const compressed = fs.readFileSync(backupPath)
+  const decompressed = zlib.gunzipSync(compressed)
+
+  let integrityResult = null
+  try {
+    const testDb = new SQL.Database(decompressed)
+    const result = testDb.exec('PRAGMA integrity_check')
+    testDb.close()
+    const rows = result?.[0]?.values?.map(row => String(row[0])) || []
+    integrityResult = rows.length === 0 ? ['ok'] : rows
+  } catch (err) {
+    integrityResult = [err.message || 'Erreur inconnue lors du controle.']
+  }
+
+  const ok = integrityResult.length === 1 && integrityResult[0].toLowerCase() === 'ok'
+  const payload = {
+    backupName: selectedBackup.name,
+    checkedAt: new Date().toISOString(),
+    ok,
+    issues: ok ? [] : integrityResult,
+  }
+
+  writeLastIntegrityCheck(payload)
+
+  return payload
+}
+
 function cleanupOldData(cutoffDate) {
   // Supprimer les anciennes utilisations (consommations) et leurs items
   db.run(`DELETE FROM utilisation_items WHERE utilisation_id IN (
@@ -1404,20 +1507,12 @@ safeHandle('setup:reset', async () => {
 
 // Backup & Replica status
 safeHandle('backup:status', () => {
-  const backupDir = getBackupDir()
   const lastBackup = getLastMonthlyBackupDate()
   const lastWeeklyBackup = getLastWeeklyBackupDate()
-  let backups = []
-
-  if (fs.existsSync(backupDir)) {
-    backups = fs.readdirSync(backupDir)
-      .filter(f => f.startsWith('dentastock-') && f.endsWith('.db.gz'))
-      .map(f => {
-        const stats = fs.statSync(path.join(backupDir, f))
-        return { name: f, size: stats.size, date: stats.mtime.toISOString() }
-      })
-      .sort((a, b) => b.date.localeCompare(a.date))
-  }
+  const backupDir = getBackupDir()
+  const backups = listBackupFiles()
+  const backupHealth = getLatestAutoBackupInfo()
+  const lastIntegrityCheck = readLastIntegrityCheck()
 
   const replicaDir = getReplicaDir()
   let replicaInfo = null
@@ -1443,6 +1538,11 @@ safeHandle('backup:status', () => {
   return {
     lastMonthlyBackup: lastBackup ? lastBackup.toISOString() : null,
     lastWeeklyBackup: lastWeeklyBackup ? lastWeeklyBackup.toISOString() : null,
+    latestAutoBackup: backupHealth.latestAutoBackup,
+    autoBackupDelayDays: backupHealth.autoBackupDelayDays,
+    autoBackupWarningLevel: backupHealth.autoBackupWarningLevel,
+    autoBackupOverdue: backupHealth.autoBackupOverdue,
+    lastIntegrityCheck,
     backups,
     backupDir,
     replica: replicaInfo,
@@ -1458,6 +1558,33 @@ safeHandle('backup:runNow', async () => {
   const backupName = `dentastock-manual-${timestamp}.db.gz`
   const { backupPath } = createCompressedBackup(backupName)
   return backupPath
+})
+
+safeHandle('backup:runAutoNow', async () => {
+  if (!db) throw new Error('Aucune base ouverte.')
+
+  const weeklyPath = runWeeklyBackupIfNeeded(true)
+  const now = new Date()
+  const lastMonthly = getLastMonthlyBackupDate()
+  const monthlyIsLate = !lastMonthly || ((now.getTime() - lastMonthly.getTime()) / (1000 * 60 * 60 * 24)) >= 30
+  const monthlyPath = monthlyIsLate ? runMonthlyBackupIfNeeded(true) : null
+
+  return {
+    weekly: weeklyPath,
+    monthly: monthlyPath,
+  }
+})
+
+safeHandle('backup:verifyIntegrity', async (_, backupName) => {
+  if (!SQL) {
+    const initSqlJs = require('sql.js')
+    const wasmPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'sql-wasm.wasm')
+      : undefined
+    SQL = await initSqlJs(wasmPath ? { locateFile: () => wasmPath } : undefined)
+  }
+
+  return verifyBackupIntegrity(backupName || null)
 })
 
 safeHandle('backup:restore', async (_, backupName) => {

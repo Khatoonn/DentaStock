@@ -11,7 +11,9 @@ contextBridge.exposeInMainWorld('api', {
   // Backup & Replica
   backupStatus: () => ipcRenderer.invoke('backup:status'),
   backupRunNow: () => ipcRenderer.invoke('backup:runNow'),
+  backupRunAutoNow: () => ipcRenderer.invoke('backup:runAutoNow'),
   backupRestore: name => ipcRenderer.invoke('backup:restore', name),
+  backupVerifyIntegrity: name => ipcRenderer.invoke('backup:verifyIntegrity', name),
   replicaSyncNow: () => ipcRenderer.invoke('replica:syncNow'),
   serverGetStatus: () => ipcRenderer.invoke('server:getStatus'),
   serverRetryConnection: () => ipcRenderer.invoke('server:retryConnection'),

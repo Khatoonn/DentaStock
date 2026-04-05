@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { useToast } from '../components/Toast'
 
 const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
@@ -53,6 +54,11 @@ const DEMO_SYSTEM = {
   replicaLastSync: null,
   lastWeeklyBackup: '2026-04-03T08:15:00.000Z',
   lastMonthlyBackup: '2026-04-01T08:00:00.000Z',
+  latestAutoBackup: '2026-04-03T08:15:00.000Z',
+  autoBackupDelayDays: 2,
+  autoBackupWarningLevel: 'green',
+  autoBackupOverdue: false,
+  lastIntegrityCheck: { backupName: 'dentastock-weekly-2026-W14.db.gz', checkedAt: '2026-04-03T08:20:00.000Z', ok: true, issues: [] },
 }
 
 const moneyFormatter = new Intl.NumberFormat('fr-FR', {
@@ -110,10 +116,13 @@ function StatCard({ label, value, sub, color, icon }) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { toast } = useToast()
   const [stats, setStats] = useState(null)
   const [monthly, setMonthly] = useState([])
   const [systemHealth, setSystemHealth] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [runningAutoBackup, setRunningAutoBackup] = useState(false)
+  const [verifyingIntegrity, setVerifyingIntegrity] = useState(false)
 
   useEffect(() => {
     let interval = null
@@ -143,6 +152,11 @@ export default function Dashboard() {
         replicaLastSync,
         lastWeeklyBackup: backupInfo?.lastWeeklyBackup || null,
         lastMonthlyBackup: backupInfo?.lastMonthlyBackup || null,
+        latestAutoBackup: backupInfo?.latestAutoBackup || null,
+        autoBackupDelayDays: backupInfo?.autoBackupDelayDays ?? null,
+        autoBackupWarningLevel: backupInfo?.autoBackupWarningLevel || 'red',
+        autoBackupOverdue: Boolean(backupInfo?.autoBackupOverdue),
+        lastIntegrityCheck: backupInfo?.lastIntegrityCheck || null,
       })
     }
 
@@ -223,6 +237,74 @@ export default function Dashboard() {
 
   const writeModeValue = systemHealth?.readOnly ? 'Lecture seule' : 'Ecriture autorisee'
   const writeModeTone = systemHealth?.readOnly ? 'amber' : 'green'
+  const backupTone = systemHealth?.autoBackupWarningLevel === 'red'
+    ? 'red'
+    : systemHealth?.autoBackupWarningLevel === 'amber'
+      ? 'amber'
+      : 'green'
+  const integrityTone = systemHealth?.lastIntegrityCheck?.ok === false
+    ? 'red'
+    : systemHealth?.lastIntegrityCheck?.ok === true
+      ? 'green'
+      : 'amber'
+
+  const refreshHealthOnly = async () => {
+    if (!isElectron) return
+    const [backupInfo, setupConfig, serverStatus] = await Promise.all([
+      window.api.backupStatus(),
+      window.api.setupGetConfig(),
+      window.api.serverGetStatus ? window.api.serverGetStatus() : Promise.resolve(null),
+    ])
+
+    const replicaLastSync = backupInfo?.replica?.lastSync || null
+    const replicaFresh = replicaLastSync
+      ? (Date.now() - new Date(replicaLastSync).getTime()) <= (15 * 60 * 1000)
+      : null
+
+    setSystemHealth({
+      setupMode: setupConfig?.mode || null,
+      readOnly: Boolean(serverStatus?.readOnly),
+      serverReachable: serverStatus?.serverReachable ?? null,
+      replicaFresh,
+      replicaLastSync,
+      lastWeeklyBackup: backupInfo?.lastWeeklyBackup || null,
+      lastMonthlyBackup: backupInfo?.lastMonthlyBackup || null,
+      latestAutoBackup: backupInfo?.latestAutoBackup || null,
+      autoBackupDelayDays: backupInfo?.autoBackupDelayDays ?? null,
+      autoBackupWarningLevel: backupInfo?.autoBackupWarningLevel || 'red',
+      autoBackupOverdue: Boolean(backupInfo?.autoBackupOverdue),
+      lastIntegrityCheck: backupInfo?.lastIntegrityCheck || null,
+    })
+  }
+
+  const runImmediateAutoBackup = async () => {
+    if (!isElectron) return
+    setRunningAutoBackup(true)
+    try {
+      await window.api.backupRunAutoNow()
+      await refreshHealthOnly()
+      toast('Sauvegarde automatique lancee.', 'success')
+    } catch (error) {
+      toast(error?.message || 'Impossible de lancer la sauvegarde automatique.', 'error')
+    } finally {
+      setRunningAutoBackup(false)
+    }
+  }
+
+  const verifyLatestBackup = async () => {
+    if (!isElectron) return
+    setVerifyingIntegrity(true)
+    try {
+      const result = await window.api.backupVerifyIntegrity()
+      await refreshHealthOnly()
+      if (result?.ok) toast(`Integrite OK sur ${result.backupName}.`, 'success')
+      else toast(`Probleme detecte sur ${result?.backupName || 'la sauvegarde'}.`, 'error')
+    } catch (error) {
+      toast(error?.message || 'Impossible de verifier la sauvegarde.', 'error')
+    } finally {
+      setVerifyingIntegrity(false)
+    }
+  }
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -292,13 +374,64 @@ export default function Dashboard() {
               <h3 className="text-sm font-semibold text-white">Sante du systeme</h3>
               <p className="text-xs text-slate-500 mt-1">Connexion serveur, replica locale et sauvegardes automatiques.</p>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={verifyLatestBackup}
+                disabled={!isElectron || verifyingIntegrity}
+                className="text-xs text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+              >
+                {verifyingIntegrity ? 'Verification...' : 'Verifier l integrite'}
+              </button>
+              <button
+                onClick={runImmediateAutoBackup}
+                disabled={!isElectron || runningAutoBackup}
+                className="text-xs text-sky-200 hover:text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+              >
+                {runningAutoBackup ? 'Sauvegarde...' : 'Sauvegarder maintenant'}
+              </button>
+            </div>
           </div>
+          {systemHealth?.autoBackupOverdue && (
+            <div className={`rounded-xl border px-4 py-4 ${systemHealth.autoBackupWarningLevel === 'red' ? 'border-red-500/30 bg-red-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}>
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div className="min-w-0">
+                  <div className={`text-sm font-semibold ${systemHealth.autoBackupWarningLevel === 'red' ? 'text-red-200' : 'text-amber-200'}`}>
+                    Sauvegarde automatique en retard
+                  </div>
+                  <div className={`text-sm mt-1 ${systemHealth.autoBackupWarningLevel === 'red' ? 'text-red-100' : 'text-amber-100'}`}>
+                    La derniere sauvegarde auto date de {systemHealth.autoBackupDelayDays ?? '?'} jour{systemHealth.autoBackupDelayDays > 1 ? 's' : ''}. Lance une sauvegarde immediate pour securiser le cabinet.
+                  </div>
+                </div>
+                <button
+                  onClick={runImmediateAutoBackup}
+                  disabled={!isElectron || runningAutoBackup}
+                  className={`shrink-0 text-sm font-medium px-4 py-2 rounded-lg transition-colors ${systemHealth.autoBackupWarningLevel === 'red' ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'} disabled:opacity-50`}
+                >
+                  {runningAutoBackup ? 'Sauvegarde...' : 'Sauvegarder maintenant'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
             <HealthPill label="Mode du poste" value={modeLabel} sub={systemHealth?.setupMode === 'client' ? 'Connecte au serveur du cabinet' : systemHealth?.setupMode === 'server' ? 'Ce poste porte la base de reference' : 'Base locale uniquement'} tone="sky" />
             <HealthPill label="Connexion serveur" value={connectionValue} sub={systemHealth?.setupMode === 'client' ? 'Retour automatique des que le serveur revient' : 'Pas de dependance reseau'} tone={connectionTone} />
             <HealthPill label="Replica locale" value={replicaValue} sub={systemHealth?.replicaLastSync ? `Derniere synchro: ${formatDateTime(systemHealth.replicaLastSync)}` : 'Aucune synchro disponible'} tone={replicaTone} />
             <HealthPill label="Derniere sauvegarde auto" value={latestBackup ? formatDateTime(latestBackup) : 'Aucune'} sub={`Hebdo: ${systemHealth?.lastWeeklyBackup ? formatDateTime(systemHealth.lastWeeklyBackup) : 'Aucune'} | Mensuelle: ${systemHealth?.lastMonthlyBackup ? formatDateTime(systemHealth.lastMonthlyBackup) : 'Aucune'}`} tone={latestBackup ? 'green' : 'amber'} />
             <HealthPill label="Mode d ecriture" value={writeModeValue} sub={systemHealth?.readOnly ? 'Les modifications sont bloquees tant que le serveur reste indisponible' : 'Les saisies sont immediatement persistantes'} tone={writeModeTone} />
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <HealthPill
+              label="Etat des sauvegardes auto"
+              value={systemHealth?.autoBackupOverdue ? 'Attention requise' : 'Cycle OK'}
+              sub={systemHealth?.latestAutoBackup ? `Derniere auto: ${formatDateTime(systemHealth.latestAutoBackup)}` : 'Aucune sauvegarde auto detectee'}
+              tone={backupTone}
+            />
+            <HealthPill
+              label="Dernier controle d integrite"
+              value={systemHealth?.lastIntegrityCheck ? (systemHealth.lastIntegrityCheck.ok ? 'Integrite OK' : 'Probleme detecte') : 'Non verifie'}
+              sub={systemHealth?.lastIntegrityCheck ? `${formatDateTime(systemHealth.lastIntegrityCheck.checkedAt)} - ${systemHealth.lastIntegrityCheck.backupName}` : 'Lance un controle sur la sauvegarde la plus recente'}
+              tone={integrityTone}
+            />
           </div>
         </div>
       )}

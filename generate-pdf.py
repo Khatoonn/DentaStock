@@ -79,7 +79,7 @@ def header_footer(canvas_obj, doc):
     canvas_obj.line(2*cm, A4[1] - 1.5*cm, A4[0] - 2*cm, A4[1] - 1.5*cm)
     canvas_obj.setFont('Helvetica', 8)
     canvas_obj.setFillColor(SLATE_400)
-    canvas_obj.drawCentredString(A4[0]/2, 1.2*cm, f"DentaStock v2.3.0 - Presentation du logiciel - Page {doc.page}")
+    canvas_obj.drawCentredString(A4[0]/2, 1.2*cm, f"DentaStock v2.4.0 - Presentation du logiciel - Page {doc.page}")
     canvas_obj.restoreState()
 
 def first_page(canvas_obj, doc):
@@ -160,7 +160,7 @@ def build():
 
     toc_items = [
         "1. Presentation generale",
-        "2. Tableau de bord et alertes",
+        "2. Tableau de bord, alertes et sante systeme",
         "3. Gestion des produits et du stock",
         "4. Commandes fournisseurs et receptions",
         "5. Inventaire physique et retours",
@@ -213,16 +213,17 @@ def build():
     story.append(PageBreak())
 
     # ---- PAGE 3: Tableau de bord ----
-    story.append(Paragraph("2. Tableau de bord et alertes", H1_STYLE))
+    story.append(Paragraph("2. Tableau de bord, alertes et sante systeme", H1_STYLE))
     story.append(Spacer(1, 0.2*cm))
 
     story.append(Paragraph(
         "Le tableau de bord offre une vue synthetique de l'activite du cabinet avec des indicateurs "
-        "en temps reel : nombre de produits, alertes de stock, commandes en attente, depenses du mois.",
+        "en temps reel : nombre de produits, alertes de stock, commandes en attente, depenses du mois "
+        "et un panneau de sante du systeme.",
         BODY_STYLE
     ))
 
-    story.extend(screenshot('dashboard', "Vue du tableau de bord avec alertes stock et peremption"))
+    story.extend(screenshot('dashboard', "Vue du tableau de bord avec alertes, depenses et sante systeme"))
 
     story.append(make_feature_table([
         "Nombre de produits references et alertes de stock en cours",
@@ -233,6 +234,20 @@ def build():
         "Listes des produits a commander et des dernieres receptions",
         "<b>Notifications Windows</b> - alertes au demarrage pour stock bas et peremptions proches",
     ], SKY))
+
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Sante du systeme", H2_STYLE))
+    story.append(Paragraph(
+        "Un panneau dedie affiche en temps reel l'etat de l'infrastructure :",
+        BODY_STYLE
+    ))
+    story.append(make_feature_table([
+        "<b>Mode du poste</b> - Serveur ou Client",
+        "<b>Etat serveur</b> - Accessible ou hors ligne",
+        "<b>Etat de la replica</b> - Synchronisee ou en attente",
+        "<b>Derniere sauvegarde auto</b> - Date et heure du dernier backup",
+        "<b>Mode d'acces</b> - Lecture seule ou lecture/ecriture",
+    ], EMERALD))
 
     story.append(PageBreak())
 
@@ -506,7 +521,7 @@ def build():
         [Paragraph("<b>Composant</b>", BODY_STYLE), Paragraph("<b>Technologie</b>", BODY_STYLE), Paragraph("<b>Role</b>", BODY_STYLE)],
         [Paragraph("Runtime", BODY_STYLE), Paragraph("Electron 29", BODY_STYLE), Paragraph("Application desktop cross-platform", BODY_STYLE)],
         [Paragraph("Interface", BODY_STYLE), Paragraph("React 18 + Tailwind CSS 3", BODY_STYLE), Paragraph("UI reactive et responsive", BODY_STYLE)],
-        [Paragraph("Build", BODY_STYLE), Paragraph("Vite 5", BODY_STYLE), Paragraph("Bundling rapide du frontend", BODY_STYLE)],
+        [Paragraph("Build", BODY_STYLE), Paragraph("Vite 5 + lazy loading", BODY_STYLE), Paragraph("Code-split par page, demarrage rapide", BODY_STYLE)],
         [Paragraph("Base de donnees", BODY_STYLE), Paragraph("SQLite (sql.js / WASM)", BODY_STYLE), Paragraph("Stockage local performant", BODY_STYLE)],
         [Paragraph("Graphiques", BODY_STYLE), Paragraph("Recharts", BODY_STYLE), Paragraph("Visualisation de donnees", BODY_STYLE)],
         [Paragraph("Installeur", BODY_STYLE), Paragraph("electron-builder / NSIS", BODY_STYLE), Paragraph("Installation Windows", BODY_STYLE)],
@@ -541,9 +556,11 @@ def build():
     story.append(Paragraph("11. Securite et sauvegarde", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
-    story.append(Paragraph("Sauvegarde", H2_STYLE))
+    story.append(Paragraph("Strategie de sauvegarde", H2_STYLE))
     story.append(make_feature_table([
-        "<b>Sauvegarde automatique</b> - La base est sauvegardee periodiquement",
+        "<b>Sauvegarde hebdomadaire roulante</b> - 8 semaines de sauvegardes conservees automatiquement",
+        "<b>Sauvegarde mensuelle compressee</b> - Archives .db.gz sur 12 mois glissants",
+        "<b>Point de restauration automatique</b> - Snapshot compresse avant chaque import ou restauration",
         "<b>Sauvegarde manuelle</b> - Declenchement a la demande depuis les parametres",
         "<b>Restauration</b> - Liste des sauvegardes disponibles avec restauration en un clic",
         "<b>Export/Import</b> - Export complet de la base pour transfert ou archivage",
