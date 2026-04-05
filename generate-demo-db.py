@@ -139,7 +139,8 @@ def create_schema(cur):
             stock_minimum REAL DEFAULT 0, prix_unitaire REAL DEFAULT 0,
             fournisseur_id INTEGER REFERENCES fournisseurs(id),
             archived INTEGER DEFAULT 0, date_peremption DATE,
-            taux_tva REAL DEFAULT 20, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            taux_tva REAL DEFAULT 20, code_barre TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS praticiens (
             id INTEGER PRIMARY KEY AUTOINCREMENT, nom TEXT NOT NULL,
@@ -221,9 +222,23 @@ def create_schema(cur):
             remise_pourcent REAL NOT NULL DEFAULT 0,
             description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS retours (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL,
+            fournisseur_id INTEGER REFERENCES fournisseurs(id),
+            motif TEXT, notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS retour_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            retour_id INTEGER REFERENCES retours(id),
+            produit_id INTEGER REFERENCES produits(id),
+            quantite INTEGER NOT NULL DEFAULT 0, prix_unitaire REAL DEFAULT 0
+        );
         CREATE INDEX IF NOT EXISTS idx_prix_hist_produit ON prix_historique(produit_id);
         CREATE INDEX IF NOT EXISTS idx_remises_fournisseur ON remises_fournisseur(fournisseur_id);
         CREATE INDEX IF NOT EXISTS idx_produits_fournisseur ON produits(fournisseur_id);
+        CREATE INDEX IF NOT EXISTS idx_retour_items_retour ON retour_items(retour_id);
+        CREATE INDEX IF NOT EXISTS idx_retour_items_produit ON retour_items(produit_id);
     """)
 
 
@@ -496,6 +511,30 @@ def main():
             if stock[pid] <= 0:
                 stock[pid] = 1
 
+    # --- Add code_barre to some products ---
+    barcodes = {
+        1: "3401560123456", 2: "3401560234567", 3: "3401560345678",
+        6: "3401097001234", 7: "3401097002345", 8: "3401097003456",
+        12: "3401054001234", 13: "3401054002345",
+        22: "3760012345678", 23: "3760012345679",
+        29: "3401085001234", 38: "3401062001234",
+    }
+    for pid, ean in barcodes.items():
+        cur.execute("UPDATE produits SET code_barre = ? WHERE id = ?", (ean, pid))
+
+    # --- Demo retours ---
+    cur.execute("INSERT INTO retours (date, fournisseur_id, motif, notes, created_at) VALUES (?,?,?,?,?)",
+                ("2026-02-15", 3, "Defectueux", "Lot de silicone durci a la reception", "2026-02-15 11:00:00"))
+    cur.execute("INSERT INTO retour_items (retour_id, produit_id, quantite, prix_unitaire) VALUES (?,?,?,?)",
+                (1, 13, 3, 18.50))
+    cur.execute("INSERT INTO retour_items (retour_id, produit_id, quantite, prix_unitaire) VALUES (?,?,?,?)",
+                (1, 14, 2, 45.00))
+
+    cur.execute("INSERT INTO retours (date, fournisseur_id, motif, notes, created_at) VALUES (?,?,?,?,?)",
+                ("2026-03-20", 1, "Perime", "Articaine lot expire avant livraison", "2026-03-20 09:30:00"))
+    cur.execute("INSERT INTO retour_items (retour_id, produit_id, quantite, prix_unitaire) VALUES (?,?,?,?)",
+                (2, 1, 5, 28.50))
+
     # --- Update final stock ---
     for pid, qty in stock.items():
         cur.execute("UPDATE produits SET stock_actuel = ? WHERE id = ?", (max(0, round(qty)), pid))
@@ -532,6 +571,8 @@ def main():
     print(f"  Lignes conso: {q('SELECT COUNT(*) FROM utilisation_items')}")
     print(f"  Historique prix: {q('SELECT COUNT(*) FROM prix_historique')}")
     print(f"  Remises: {q('SELECT COUNT(*) FROM remises_fournisseur')}")
+    print(f"  Retours: {q('SELECT COUNT(*) FROM retours')}")
+    print(f"  Lignes retour: {q('SELECT COUNT(*) FROM retour_items')}")
     val = q("SELECT COALESCE(SUM(stock_actuel * prix_unitaire),0) FROM produits")
     print(f"  Valeur stock: {val:.2f} EUR")
     alert_q = "SELECT COUNT(*) FROM produits WHERE stock_actuel <= stock_minimum AND stock_actuel > 0"

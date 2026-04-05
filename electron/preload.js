@@ -52,6 +52,16 @@ contextBridge.exposeInMainWorld('api', {
   commandesAdd: data => ipcRenderer.invoke('commandes:add', data),
   commandesUpdate: (id, data) => ipcRenderer.invoke('commandes:update', id, data),
   commandesUpdateStatus: (id, statut) => ipcRenderer.invoke('commandes:updateStatus', id, statut),
+  commandesDelete: id => ipcRenderer.invoke('commandes:delete', id),
+  commandesExportPdf: id => ipcRenderer.invoke('commandes:exportPdf', id),
+
+  // Inventaire
+  inventaireList: () => ipcRenderer.invoke('inventaire:list'),
+  inventaireAdjust: (adjustments) => ipcRenderer.invoke('inventaire:adjust', adjustments),
+
+  // Retours
+  retoursList: () => ipcRenderer.invoke('retours:list'),
+  retoursAdd: data => ipcRenderer.invoke('retours:add', data),
 
   // Praticiens
   praticiensList: () => ipcRenderer.invoke('praticiens:list'),

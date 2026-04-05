@@ -79,7 +79,7 @@ def header_footer(canvas_obj, doc):
     canvas_obj.line(2*cm, A4[1] - 1.5*cm, A4[0] - 2*cm, A4[1] - 1.5*cm)
     canvas_obj.setFont('Helvetica', 8)
     canvas_obj.setFillColor(SLATE_400)
-    canvas_obj.drawCentredString(A4[0]/2, 1.2*cm, f"DentaStock v2.1.0 - Presentation du logiciel - Page {doc.page}")
+    canvas_obj.drawCentredString(A4[0]/2, 1.2*cm, f"DentaStock v2.3.0 - Presentation du logiciel - Page {doc.page}")
     canvas_obj.restoreState()
 
 def first_page(canvas_obj, doc):
@@ -92,7 +92,7 @@ def first_page(canvas_obj, doc):
     canvas_obj.setFont('Helvetica', 18)
     canvas_obj.drawString(2.5*cm, A4[1] - 5.2*cm, "Gestion de stock pour cabinet dentaire")
     canvas_obj.setFont('Helvetica', 13)
-    canvas_obj.drawString(2.5*cm, A4[1] - 6.5*cm, "Version 2.1.0  |  Application desktop  |  Reseau local")
+    canvas_obj.drawString(2.5*cm, A4[1] - 6.5*cm, "Version 2.3.0  |  Application desktop  |  Reseau local")
     canvas_obj.setFont('Helvetica', 9)
     canvas_obj.setFillColor(SLATE_400)
     canvas_obj.drawCentredString(A4[0]/2, 1.5*cm, "Document de presentation - Confidentiel")
@@ -160,15 +160,16 @@ def build():
 
     toc_items = [
         "1. Presentation generale",
-        "2. Tableau de bord",
+        "2. Tableau de bord et alertes",
         "3. Gestion des produits et du stock",
         "4. Commandes fournisseurs et receptions",
-        "5. Consommation et tracabilite",
-        "6. Statistiques et indicateurs",
-        "7. Fournisseurs et remises",
-        "8. Fonctionnalites avancees",
-        "9. Architecture technique",
-        "10. Securite et sauvegarde",
+        "5. Inventaire physique et retours",
+        "6. Consommation et tracabilite",
+        "7. Statistiques et indicateurs",
+        "8. Fournisseurs et remises",
+        "9. Fonctionnalites avancees",
+        "10. Architecture technique",
+        "11. Securite et sauvegarde",
     ]
     for item in toc_items:
         story.append(Paragraph(item, ParagraphStyle(
@@ -212,7 +213,7 @@ def build():
     story.append(PageBreak())
 
     # ---- PAGE 3: Tableau de bord ----
-    story.append(Paragraph("2. Tableau de bord", H1_STYLE))
+    story.append(Paragraph("2. Tableau de bord et alertes", H1_STYLE))
     story.append(Spacer(1, 0.2*cm))
 
     story.append(Paragraph(
@@ -221,14 +222,16 @@ def build():
         BODY_STYLE
     ))
 
-    story.extend(screenshot('dashboard', "Vue du tableau de bord avec KPIs et commandes en cours"))
+    story.extend(screenshot('dashboard', "Vue du tableau de bord avec alertes stock et peremption"))
 
     story.append(make_feature_table([
         "Nombre de produits references et alertes de stock en cours",
+        "<b>Alertes de peremption</b> - produits et lots proches de l'expiration (bandeau ambre)",
         "Commandes en attente de reception",
         "Montant des achats du mois en cours",
         "Graphique des depenses mensuelles (6 derniers mois)",
         "Listes des produits a commander et des dernieres receptions",
+        "<b>Notifications Windows</b> - alertes au demarrage pour stock bas et peremptions proches",
     ], SKY))
 
     story.append(PageBreak())
@@ -248,9 +251,11 @@ def build():
 
     story.append(make_feature_table([
         "Catalogue complet avec reference, nom, categorie, unite et prix HT/TTC",
+        "<b>Code-barres EAN</b> - Champ dedie avec recherche par scan ou saisie",
         "Gestion des dates de peremption avec alertes visuelles (30j / 90j)",
         "Archivage et restauration des produits obsoletes",
         "Pagination des listes pour les grands catalogues (25 elements/page)",
+        "<b>Onglet Inventaire</b> - Comparaison stock theorique / reel avec ajustements en lot",
     ], SKY))
 
     story.append(Spacer(1, 0.3*cm))
@@ -282,6 +287,7 @@ def build():
         [Paragraph("3. Suivi", BODY_STYLE), Paragraph("Statuts : En attente, Partielle, Receptionnee, Archivee", BODY_STYLE)],
         [Paragraph("4. Reception", BODY_STYLE), Paragraph("Saisie des quantites recues, prix, numero de lot", BODY_STYLE)],
         [Paragraph("5. Mise en stock", BODY_STYLE), Paragraph("Mise a jour automatique du stock et de l'historique des prix", BODY_STYLE)],
+        [Paragraph("6. Export PDF", BODY_STYLE), Paragraph("Bon de commande imprimable au format PDF (bouton par commande)", BODY_STYLE)],
     ]
     wt = Table(workflow_data, colWidths=[3.5*cm, 12*cm])
     wt.setStyle(TableStyle([
@@ -298,10 +304,65 @@ def build():
 
     story.extend(screenshot('reception', "Page de reception des commandes"))
 
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Recherche produit intelligente", H2_STYLE))
+    story.append(Paragraph(
+        "Lors de la creation d'une commande ou d'une reception, un champ de <b>recherche autocomplete</b> "
+        "permet de retrouver un produit par son nom, sa reference ou son <b>code-barres</b>. "
+        "Compatible avec les lecteurs de code-barres USB.",
+        BODY_STYLE
+    ))
+
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Reception rapide", H2_STYLE))
+    story.append(Paragraph(
+        "Boutons <b>\"Tout receptionne\"</b> par ligne et <b>\"Reception complete\"</b> globale pour valider "
+        "rapidement toute la commande. Colonne <b>Recu / Commande</b> visible lors de l'edition "
+        "d'une commande partielle.",
+        BODY_STYLE
+    ))
+
     story.append(PageBreak())
 
-    # ---- PAGE 6: Consommation ----
-    story.append(Paragraph("5. Consommation et tracabilite", H1_STYLE))
+    # ---- PAGE: Inventaire et retours ----
+    story.append(Paragraph("5. Inventaire physique et retours", H1_STYLE))
+    story.append(Spacer(1, 0.2*cm))
+
+    story.append(Paragraph("Inventaire physique", H2_STYLE))
+    story.append(Paragraph(
+        "L'onglet <b>Inventaire</b> de la page Produits permet de realiser un inventaire physique : "
+        "chaque produit affiche son stock theorique, et l'utilisateur saisit le stock reel. "
+        "L'ecart est calcule en temps reel avec code couleur (vert/rouge). "
+        "Un bouton <b>\"Valider les ajustements\"</b> applique toutes les corrections en une seule operation.",
+        BODY_STYLE
+    ))
+
+    story.append(make_feature_table([
+        "Filtre de recherche pour cibler les produits a inventorier",
+        "Affichage de l'ecart stock theorique / reel avec code couleur",
+        "Application en lot de tous les ajustements avec confirmation",
+    ], AMBER))
+
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Retours fournisseur", H2_STYLE))
+    story.append(Paragraph(
+        "Le module <b>Retours</b> (accessible depuis la page Reception) permet d'enregistrer "
+        "les produits retournes a un fournisseur (defectueux, perimes, rappel fabricant, erreur). "
+        "Le stock est automatiquement deduit lors de la validation du retour.",
+        BODY_STYLE
+    ))
+
+    story.append(make_feature_table([
+        "Motifs predefinis : defectueux, perime, erreur commande, rappel fabricant",
+        "Recherche produit avec autocomplete (nom, reference, code-barres)",
+        "Historique complet des retours avec montant total par fournisseur",
+        "Deduction automatique du stock a la validation",
+    ], RED))
+
+    story.append(PageBreak())
+
+    # ---- PAGE: Consommation ----
+    story.append(Paragraph("6. Consommation et tracabilite", H1_STYLE))
     story.append(Spacer(1, 0.2*cm))
 
     story.append(Paragraph("Saisie de consommation", H2_STYLE))
@@ -325,8 +386,8 @@ def build():
 
     story.append(PageBreak())
 
-    # ---- PAGE 7: Statistiques ----
-    story.append(Paragraph("6. Statistiques et indicateurs", H1_STYLE))
+    # ---- PAGE: Statistiques ----
+    story.append(Paragraph("7. Statistiques et indicateurs", H1_STYLE))
     story.append(Spacer(1, 0.2*cm))
 
     story.append(Paragraph(
@@ -347,8 +408,8 @@ def build():
 
     story.append(PageBreak())
 
-    # ---- PAGE 8: Fournisseurs ----
-    story.append(Paragraph("7. Fournisseurs et remises", H1_STYLE))
+    # ---- PAGE: Fournisseurs ----
+    story.append(Paragraph("8. Fournisseurs et remises", H1_STYLE))
     story.append(Spacer(1, 0.2*cm))
 
     story.append(Paragraph(
@@ -379,8 +440,8 @@ def build():
 
     story.append(PageBreak())
 
-    # ---- PAGE 9: Fonctionnalites avancees ----
-    story.append(Paragraph("8. Fonctionnalites avancees", H1_STYLE))
+    # ---- PAGE: Fonctionnalites avancees ----
+    story.append(Paragraph("9. Fonctionnalites avancees", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
     story.append(Paragraph("Export CSV", H2_STYLE))
@@ -412,10 +473,17 @@ def build():
         BODY_STYLE
     ))
 
+    story.append(Paragraph("Export PDF bon de commande", H2_STYLE))
+    story.append(Paragraph(
+        "Chaque commande dispose d'un bouton <b>PDF</b> qui genere un bon de commande professionnel "
+        "avec en-tete du cabinet, coordonnees du fournisseur, tableau des produits et totaux. "
+        "Le PDF est enregistrable directement pour envoi par email.",
+        BODY_STYLE
+    ))
+
     story.append(Paragraph("Impression et GED", H2_STYLE))
     story.append(Paragraph(
-        "Les fiches produit peuvent etre imprimees directement. Le module Documents/GED "
-        "permet le stockage et la consultation des bons de livraison et factures.",
+        "Le module Documents/GED permet le stockage et la consultation des bons de livraison et factures.",
         BODY_STYLE
     ))
 
@@ -430,8 +498,8 @@ def build():
 
     story.append(PageBreak())
 
-    # ---- PAGE 10: Architecture technique ----
-    story.append(Paragraph("9. Architecture technique", H1_STYLE))
+    # ---- PAGE: Architecture technique ----
+    story.append(Paragraph("10. Architecture technique", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
     tech_data = [
@@ -469,8 +537,8 @@ def build():
 
     story.append(PageBreak())
 
-    # ---- PAGE 11: Securite ----
-    story.append(Paragraph("10. Securite et sauvegarde", H1_STYLE))
+    # ---- PAGE: Securite ----
+    story.append(Paragraph("11. Securite et sauvegarde", H1_STYLE))
     story.append(Spacer(1, 0.3*cm))
 
     story.append(Paragraph("Sauvegarde", H2_STYLE))
@@ -501,7 +569,7 @@ def build():
         "avancees (seuils intelligents, statistiques, remises fournisseurs) et son fonctionnement "
         "en reseau local en font un outil indispensable pour optimiser les couts et eviter "
         "les ruptures de stock.<br/><br/>"
-        "<b>Version actuelle :</b> 2.1.0<br/>"
+        "<b>Version actuelle :</b> 2.3.0<br/>"
         "<b>Plateforme :</b> Windows (10/11)<br/>"
         "<b>Licence :</b> Logiciel proprietaire",
         BODY_STYLE

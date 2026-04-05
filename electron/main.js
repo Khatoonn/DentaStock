@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const zlib = require('zlib')
@@ -987,6 +987,7 @@ function ensureSchema() {
 
   // TVA par produit
   ensureColumn('produits', 'taux_tva', 'REAL DEFAULT 20')
+  ensureColumn('produits', 'code_barre', 'TEXT')
 
   // Index sur les clés étrangères pour accélérer les jointures
   db.run('CREATE INDEX IF NOT EXISTS idx_produits_fournisseur ON produits(fournisseur_id)')
@@ -1006,6 +1007,25 @@ function ensureSchema() {
   db.run('CREATE INDEX IF NOT EXISTS idx_documents_fournisseur ON documents(fournisseur_id)')
   db.run('CREATE INDEX IF NOT EXISTS idx_documents_reception ON documents(reception_id)')
   db.run('CREATE INDEX IF NOT EXISTS idx_documents_date ON documents(date)')
+
+  // Retours fournisseur
+  db.run(`CREATE TABLE IF NOT EXISTS retours (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    fournisseur_id INTEGER REFERENCES fournisseurs(id),
+    motif TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`)
+  db.run(`CREATE TABLE IF NOT EXISTS retour_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    retour_id INTEGER REFERENCES retours(id),
+    produit_id INTEGER REFERENCES produits(id),
+    quantite INTEGER NOT NULL DEFAULT 0,
+    prix_unitaire REAL DEFAULT 0
+  )`)
+  db.run('CREATE INDEX IF NOT EXISTS idx_retour_items_retour ON retour_items(retour_id)')
+  db.run('CREATE INDEX IF NOT EXISTS idx_retour_items_produit ON retour_items(produit_id)')
 
   syncCategoriesCatalog()
 }
@@ -1422,8 +1442,8 @@ safeHandle('produits:add', async (_, data) => {
     }
 
     return dbInsert(`INSERT INTO produits (
-      reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire, fournisseur_id, date_peremption
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire, fournisseur_id, date_peremption, code_barre
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       data.reference,
       data.nom,
       data.categorie,
@@ -1433,6 +1453,7 @@ safeHandle('produits:add', async (_, data) => {
       data.prix_unitaire || 0,
       data.fournisseur_id || null,
       data.date_peremption || null,
+      data.code_barre || null,
     ])
   })
 })
@@ -1444,7 +1465,7 @@ safeHandle('produits:update', async (_, id, data) => {
     }
 
     dbRun(`UPDATE produits
-      SET reference = ?, nom = ?, categorie = ?, unite = ?, stock_actuel = ?, stock_minimum = ?, prix_unitaire = ?, fournisseur_id = ?, date_peremption = ?
+      SET reference = ?, nom = ?, categorie = ?, unite = ?, stock_actuel = ?, stock_minimum = ?, prix_unitaire = ?, fournisseur_id = ?, date_peremption = ?, code_barre = ?
       WHERE id = ?`, [
       data.reference,
       data.nom,
@@ -1455,6 +1476,7 @@ safeHandle('produits:update', async (_, id, data) => {
       data.prix_unitaire,
       data.fournisseur_id,
       data.date_peremption || null,
+      data.code_barre || null,
       id,
     ])
   })
@@ -1650,6 +1672,160 @@ safeHandle('commandes:update', async (_, id, data) => {
 safeHandle('commandes:updateStatus', async (_, id, statut) => {
   await withWriteTransaction(() => {
     dbRun('UPDATE commandes SET statut = ? WHERE id = ?', [normalizeCommandeStatus(statut), id])
+  })
+})
+
+safeHandle('commandes:delete', async (_, id) => {
+  await withWriteTransaction(() => {
+    // Supprimer les items de la commande puis la commande elle-meme
+    dbRun('DELETE FROM commande_items WHERE commande_id = ?', [id])
+    dbRun('DELETE FROM commandes WHERE id = ?', [id])
+  })
+})
+
+safeHandle('commandes:exportPdf', async (_, commandeId) => {
+  const commande = dbGet(`SELECT c.*, f.nom AS fournisseur_nom, f.adresse AS fournisseur_adresse,
+    f.telephone AS fournisseur_telephone, f.email AS fournisseur_email
+    FROM commandes c
+    LEFT JOIN fournisseurs f ON c.fournisseur_id = f.id
+    WHERE c.id = ?`, [commandeId])
+  if (!commande) throw new Error('Commande introuvable.')
+
+  const items = dbAll(`SELECT ci.*, p.nom AS produit_nom, p.reference, p.unite
+    FROM commande_items ci
+    LEFT JOIN produits p ON ci.produit_id = p.id
+    WHERE ci.commande_id = ?
+    ORDER BY p.nom`, [commandeId])
+
+  const cabinetNom = (dbGet("SELECT valeur FROM config WHERE cle = 'cabinet_nom'") || {}).valeur || 'Cabinet Dentaire'
+  const cabinetAdresse = (dbGet("SELECT valeur FROM config WHERE cle = 'cabinet_adresse'") || {}).valeur || ''
+
+  const total = items.reduce((s, i) => s + (i.quantite || 0) * (i.prix_unitaire || 0), 0)
+  const formatDate = d => d ? new Date(d).toLocaleDateString('fr-FR') : '-'
+  const formatMoney = v => Number(v || 0).toFixed(2).replace('.', ',') + ' \u20ac'
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #1e293b; font-size: 13px; }
+    h1 { font-size: 22px; color: #0f172a; margin-bottom: 4px; }
+    .ref { font-size: 14px; color: #64748b; margin-bottom: 20px; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 30px; }
+    .header-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; min-width: 240px; }
+    .header-box h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px; }
+    .header-box p { margin: 2px 0; font-size: 13px; }
+    .meta { display: flex; gap: 30px; margin-bottom: 20px; }
+    .meta-item { font-size: 12px; color: #64748b; }
+    .meta-item strong { color: #1e293b; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th { background: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
+    .text-right { text-align: right; }
+    .total-row td { border-top: 2px solid #e2e8f0; font-weight: bold; font-size: 14px; padding-top: 14px; }
+    .footer { margin-top: 40px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+    .notes { margin-top: 20px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px 14px; font-size: 12px; }
+  </style></head><body>
+    <h1>Bon de Commande</h1>
+    <div class="ref">${commande.reference_commande || 'CMD-' + commandeId}</div>
+    <div class="header">
+      <div class="header-box">
+        <h3>Emetteur</h3>
+        <p><strong>${cabinetNom}</strong></p>
+        ${cabinetAdresse ? '<p>' + cabinetAdresse.replace(/\n/g, '<br>') + '</p>' : ''}
+      </div>
+      <div class="header-box">
+        <h3>Fournisseur</h3>
+        <p><strong>${commande.fournisseur_nom || 'Non renseigne'}</strong></p>
+        ${commande.fournisseur_adresse ? '<p>' + commande.fournisseur_adresse.replace(/\n/g, '<br>') + '</p>' : ''}
+        ${commande.fournisseur_telephone ? '<p>Tel: ' + commande.fournisseur_telephone + '</p>' : ''}
+        ${commande.fournisseur_email ? '<p>Email: ' + commande.fournisseur_email + '</p>' : ''}
+      </div>
+    </div>
+    <div class="meta">
+      <div class="meta-item">Date commande : <strong>${formatDate(commande.date_commande)}</strong></div>
+      <div class="meta-item">Livraison souhaitee : <strong>${formatDate(commande.date_prevue)}</strong></div>
+      <div class="meta-item">Statut : <strong>${commande.statut || 'EN_ATTENTE'}</strong></div>
+    </div>
+    <table>
+      <thead><tr><th>Reference</th><th>Produit</th><th>Unite</th><th class="text-right">Quantite</th><th class="text-right">Prix unit. HT</th><th class="text-right">Total HT</th></tr></thead>
+      <tbody>
+        ${items.map(i => '<tr><td>' + (i.reference || '-') + '</td><td>' + (i.produit_nom || '-') + '</td><td>' + (i.unite || '-') + '</td><td class="text-right">' + (i.quantite || 0) + '</td><td class="text-right">' + formatMoney(i.prix_unitaire) + '</td><td class="text-right">' + formatMoney((i.quantite || 0) * (i.prix_unitaire || 0)) + '</td></tr>').join('')}
+        <tr class="total-row"><td colspan="5" class="text-right">Total HT :</td><td class="text-right">${formatMoney(total)}</td></tr>
+      </tbody>
+    </table>
+    ${commande.notes ? '<div class="notes"><strong>Notes :</strong> ' + commande.notes + '</div>' : ''}
+    <div class="footer">Document genere par DentaStock le ${new Date().toLocaleDateString('fr-FR')}</div>
+  </body></html>`
+
+  const pdfWindow = new BrowserWindow({ show: false, width: 800, height: 600 })
+  await pdfWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  const pdfBuffer = await pdfWindow.webContents.printToPDF({
+    printBackground: true,
+    marginType: 0,
+    pageSize: 'A4',
+  })
+  pdfWindow.destroy()
+
+  const defaultName = `${commande.reference_commande || 'commande-' + commandeId}.pdf`
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Enregistrer le bon de commande',
+    defaultPath: defaultName,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+
+  if (result.canceled || !result.filePath) return { success: false }
+
+  fs.writeFileSync(result.filePath, pdfBuffer)
+  return { success: true, path: result.filePath }
+})
+
+// Inventaire
+safeHandle('inventaire:list', () => {
+  return dbAll(`SELECT id, reference, nom, categorie, unite, stock_actuel, stock_minimum, prix_unitaire
+    FROM produits WHERE archived = 0 ORDER BY categorie, nom`)
+})
+
+safeHandle('inventaire:adjust', async (_, adjustments) => {
+  // adjustments = [{ produit_id, stock_reel, motif }]
+  return withWriteTransaction(() => {
+    let count = 0
+    for (const adj of adjustments) {
+      if (adj.stock_reel !== undefined && adj.stock_reel !== null) {
+        dbRun('UPDATE produits SET stock_actuel = ? WHERE id = ?', [adj.stock_reel, adj.produit_id])
+        count++
+      }
+    }
+    return { adjusted: count }
+  })
+})
+
+// Retours fournisseur
+safeHandle('retours:list', () => {
+  return dbAll(`SELECT r.*, f.nom AS fournisseur_nom,
+    (SELECT COUNT(*) FROM retour_items ri WHERE ri.retour_id = r.id) AS nb_produits,
+    (SELECT SUM(ri.quantite * ri.prix_unitaire) FROM retour_items ri WHERE ri.retour_id = r.id) AS montant_total
+    FROM retours r
+    LEFT JOIN fournisseurs f ON r.fournisseur_id = f.id
+    ORDER BY r.date DESC
+    LIMIT 50`)
+})
+
+safeHandle('retours:add', async (_, data) => {
+  return withWriteTransaction(() => {
+    const retourId = dbInsert(`INSERT INTO retours (date, fournisseur_id, motif, notes)
+      VALUES (?, ?, ?, ?)`, [
+      data.date || new Date().toISOString().split('T')[0],
+      data.fournisseur_id || null,
+      data.motif || null,
+      data.notes || null,
+    ])
+
+    for (const item of data.items || []) {
+      dbRun(`INSERT INTO retour_items (retour_id, produit_id, quantite, prix_unitaire)
+        VALUES (?, ?, ?, ?)`, [retourId, item.produit_id, Number(item.quantite || 0), Number(item.prix_unitaire || 0)])
+      // Deduct from stock
+      dbRun('UPDATE produits SET stock_actuel = MAX(0, stock_actuel - ?) WHERE id = ?', [Number(item.quantite || 0), item.produit_id])
+    }
+
+    return retourId
   })
 })
 
@@ -2647,6 +2823,25 @@ app.whenReady().then(async () => {
   }
 
   createWindow()
+
+  // Notifications d'alerte au démarrage
+  if (db) {
+    try {
+      const alerteStock = dbGet('SELECT COUNT(*) AS c FROM produits WHERE archived = 0 AND stock_actuel <= stock_minimum')
+      const alertePeremption = dbGet(`SELECT COUNT(*) AS c FROM produits
+        WHERE archived = 0 AND date_peremption IS NOT NULL AND date_peremption <= date('now', '+30 days') AND stock_actuel > 0`)
+      const messages = []
+      if (alerteStock && alerteStock.c > 0) messages.push(`${alerteStock.c} produit${alerteStock.c > 1 ? 's' : ''} en rupture de stock`)
+      if (alertePeremption && alertePeremption.c > 0) messages.push(`${alertePeremption.c} produit${alertePeremption.c > 1 ? 's' : ''} proche${alertePeremption.c > 1 ? 's' : ''} de la peremption`)
+      if (messages.length > 0 && Notification.isSupported()) {
+        new Notification({
+          title: 'DentaStock - Alertes',
+          body: messages.join('\n'),
+          icon: path.join(__dirname, '../build/icon.png'),
+        }).show()
+      }
+    } catch (e) { console.error('[DentaStock] Notification error:', e.message) }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

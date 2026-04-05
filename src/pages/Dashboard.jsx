@@ -27,6 +27,13 @@ const DEMO_STATS = {
     { id: 29, fournisseur_nom: 'Dental Express', reference_commande: 'CMD-202604-029', statut: 'EN_ATTENTE', montant_total: 680.50 },
     { id: 30, fournisseur_nom: 'Gacd', reference_commande: 'CMD-202603-030', statut: 'PARTIELLE', montant_total: 534.80 },
   ],
+  alertesPeremption: [
+    { id: 1, nom: 'Articaine 4% 1/100 000', date_peremption: '2026-04-18', unite: 'boite', jours_restants: 13 },
+    { id: 12, nom: 'Alginate prise rapide 500g', date_peremption: '2026-05-15', unite: 'sachet', jours_restants: 40 },
+  ],
+  alertesLots: [
+    { produit_id: 6, nom: 'Composite A2 seringue 4g', lot: 'LOT-2024-089', date_expiration: '2026-04-20', quantite: 3, unite: 'seringue', jours_restants: 15 },
+  ],
 }
 
 const DEMO_MONTHLY = [
@@ -96,18 +103,34 @@ export default function Dashboard() {
     produitsAlerte,
     dernieresReceptions,
     commandesEnCours,
+    alertesPeremption = [],
+    alertesLots = [],
   } = stats
 
   return (
     <div className="space-y-6 w-full min-w-0">
-      {alertesStock > 0 && (
-        <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-3">
-          <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <span className="text-sm text-red-300 font-medium min-w-0">
-            {alertesStock} produit{alertesStock > 1 ? 's' : ''} en alerte de stock - commande recommandee
-          </span>
+      {(alertesStock > 0 || alertesPeremption.length > 0 || alertesLots.length > 0) && (
+        <div className="space-y-2">
+          {alertesStock > 0 && (
+            <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-3">
+              <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className="text-sm text-red-300 font-medium min-w-0">
+                {alertesStock} produit{alertesStock > 1 ? 's' : ''} en alerte de stock - commande recommandee
+              </span>
+            </div>
+          )}
+          {(alertesPeremption.length > 0 || alertesLots.length > 0) && (
+            <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-5 py-3">
+              <svg className="w-5 h-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm text-amber-300 font-medium min-w-0">
+                {alertesPeremption.length + alertesLots.length} produit{alertesPeremption.length + alertesLots.length > 1 ? 's' : ''} / lot{alertesLots.length > 1 ? 's' : ''} proche{alertesPeremption.length + alertesLots.length > 1 ? 's' : ''} de la peremption
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -164,7 +187,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden min-w-0">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 gap-3">
             <h2 className="font-semibold text-white text-sm">Produits a commander</h2>
@@ -264,6 +287,53 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {(alertesPeremption.length > 0 || alertesLots.length > 0) && (
+          <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden min-w-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 gap-3">
+              <h2 className="font-semibold text-white text-sm">Peremptions proches</h2>
+              <span className="text-xs text-amber-400 font-medium bg-amber-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
+                {alertesPeremption.length + alertesLots.length} alerte{alertesPeremption.length + alertesLots.length > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="divide-y divide-slate-700/50">
+              {alertesPeremption.map(a => {
+                const j = Math.round(a.jours_restants || 0)
+                return (
+                  <div key={`p-${a.id}`} className="flex items-center justify-between gap-4 px-5 py-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{a.nom}</div>
+                      <div className="text-xs text-slate-500">Fiche produit</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className={`text-sm font-bold tabular-nums ${j <= 0 ? 'text-red-400' : j <= 30 ? 'text-amber-400' : 'text-slate-300'}`}>
+                        {j <= 0 ? 'Expire' : `${j}j`}
+                      </div>
+                      <div className="text-xs text-slate-500">{new Date(a.date_peremption).toLocaleDateString('fr-FR')}</div>
+                    </div>
+                  </div>
+                )
+              })}
+              {alertesLots.map((a, i) => {
+                const j = Math.round(a.jours_restants || 0)
+                return (
+                  <div key={`l-${i}`} className="flex items-center justify-between gap-4 px-5 py-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{a.nom}</div>
+                      <div className="text-xs text-slate-500">Lot {a.lot || '?'} — {a.quantite} {a.unite}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className={`text-sm font-bold tabular-nums ${j <= 0 ? 'text-red-400' : j <= 30 ? 'text-amber-400' : 'text-slate-300'}`}>
+                        {j <= 0 ? 'Expire' : `${j}j`}
+                      </div>
+                      <div className="text-xs text-slate-500">{new Date(a.date_expiration).toLocaleDateString('fr-FR')}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

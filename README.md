@@ -2,27 +2,29 @@
 
 Application de gestion de stock pour cabinet dentaire, multi-postes en reseau local (serveur/client).
 
-**[Telecharger l'installateur Windows (v2.2.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.2.0)**
+**[Telecharger l'installateur Windows (v2.3.0)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.3.0)**
 
 ## Fonctionnalites
 
-- **Tableau de bord** — Vue d'ensemble avec graphiques : alertes stock, commandes en cours, depenses mensuelles, KPIs
-- **Commandes & Receptions** — Cycle complet : creation de commande, commande automatique, reception partielle ou totale, tracabilite des lots
-- **Produits & Stock** — Catalogue complet avec categories, peremption, seuils intelligents, historique des prix, pagination
-- **Consommation** — Saisie par soin et praticien, avec recherche par autocompletion et templates
+- **Tableau de bord** — Vue d'ensemble avec KPIs, alertes stock, alertes peremption (produits + lots), commandes en cours, depenses mensuelles
+- **Commandes & Receptions** — Cycle complet : creation de commande, commande automatique, reception partielle/totale, tracabilite des lots, bouton "Tout receptionne" / "Reception complete"
+- **Export PDF bon de commande** — Generation de bons de commande professionnels en PDF (en-tete cabinet, coordonnees fournisseur, tableau produits)
+- **Produits & Stock** — Catalogue avec categories, code-barres EAN, peremption, seuils intelligents, historique des prix, pagination
+- **Inventaire physique** — Onglet dedie pour comparer stock theorique vs reel et appliquer les ajustements en lot
+- **Retours fournisseur** — Enregistrement des retours (defectueux, perimes, rappel fabricant) avec deduction automatique du stock
+- **Consommation** — Saisie par soin et praticien, avec recherche par autocompletion (nom, reference, code-barres) et templates
 - **Fournisseurs** — Gestion avec coordonnees, remises par palier de quantite
 - **Praticiens** — Gestion des praticiens avec archivage/restauration
-- **Statistiques** — Graphiques interactifs : depenses, top produits, repartition par categorie, alertes peremption
+- **Statistiques** — Graphiques interactifs : depenses, top produits, repartition par categorie, alertes peremption par lot
 - **Documents / GED** — Archivage structure des BL et factures, preview integre, export
 - **Export CSV** — Export de toutes les donnees (produits, commandes, consommations, fournisseurs) compatible Excel
 - **Recherche globale** — Ctrl+K pour trouver produits, fournisseurs, commandes depuis n'importe quel ecran
+- **Notifications Windows** — Alertes automatiques au demarrage (stock bas, peremptions proches)
 - **Theme clair / sombre** — Basculer via le bouton dans le header
-- **Notifications toast** — Confirmations visuelles non-intrusives pour toutes les actions
 - **Raccourcis clavier** — Alt+1-9 pour naviguer, Ctrl+K recherche, Ctrl+N nouveau produit
 - **Seuils intelligents** — Analyse de consommation pour recommander les seuils optimaux
 - **Prix HT/TTC** — Affichage des prix avec TVA, remises fournisseur automatiques
 - **Mise a jour automatique** — Notification et installation des nouvelles versions via GitHub Releases
-- **Impression** — Impression des fiches produit avec mise en page optimisee
 
 ### Architecture serveur/client
 
@@ -63,7 +65,7 @@ npm run dev
 npm run pack
 ```
 
-Genere `dist/DentaStock Setup 2.2.0.exe`
+Genere `dist/DentaStock Setup 2.3.0.exe`
 
 ### Base de demonstration
 

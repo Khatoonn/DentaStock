@@ -24,6 +24,7 @@ function createEmptyProductForm() {
     prix_unitaire: 0,
     fournisseur_id: '',
     date_peremption: '',
+    code_barre: '',
   }
 }
 
@@ -79,6 +80,12 @@ export default function Produits() {
   const [editingCategoryId, setEditingCategoryId] = useState(null)
   const [savingCategory, setSavingCategory] = useState(false)
 
+  // Inventaire
+  const [inventaireData, setInventaireData] = useState([])
+  const [inventaireEdits, setInventaireEdits] = useState({}) // { produitId: stockReel }
+  const [savingInventaire, setSavingInventaire] = useState(false)
+  const [inventaireFilter, setInventaireFilter] = useState('')
+
   // Product detail sheet
   const [selectedId, setSelectedId] = useState(null)
   const [sheetForm, setSheetForm] = useState(null)
@@ -132,6 +139,15 @@ export default function Produits() {
 
   useEffect(() => { load() }, [])
 
+  const loadInventaire = async () => {
+    if (!isElectron) return
+    try {
+      const data = await window.api.inventaireList()
+      setInventaireData(data || [])
+      setInventaireEdits({})
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   // Derived
   const categoryRecords = useMemo(() => buildCategoryRecords(categories, produits), [categories, produits])
   const categoryNames = categoryRecords.map(c => c.nom)
@@ -172,6 +188,7 @@ export default function Produits() {
       stock_minimum: Number(p.stock_minimum || 0), prix_unitaire: Number(p.prix_unitaire || 0),
       fournisseur_id: Number(p.fournisseur_id || '') || '',
       date_peremption: p.date_peremption || '',
+      code_barre: p.code_barre || '',
     })
     setEditingProductId(p.id)
     setShowProductForm(true)
@@ -299,6 +316,7 @@ export default function Produits() {
       stock_minimum: Number(p.stock_minimum || 0), prix_unitaire: Number(p.prix_unitaire || 0),
       fournisseur_id: p.fournisseur_id || null,
       date_peremption: p.date_peremption || '',
+      code_barre: p.code_barre || '',
     })
     setProductHistory({ commandes: [], receptions: [] })
     setPrixHistory([])
@@ -342,6 +360,7 @@ export default function Produits() {
         stock_actuel: Number(sheetForm.stock_actuel || 0), stock_minimum: Number(sheetForm.stock_minimum || 0),
         prix_unitaire: Number(sheetForm.prix_unitaire || 0), fournisseur_id: sheetForm.fournisseur_id || null,
         date_peremption: sheetForm.date_peremption || null,
+        code_barre: sheetForm.code_barre || null,
       })
       await load()
       const [h, ph] = await Promise.all([window.api.produitsHistory(selectedId), window.api.prixHistorique(selectedId)])
@@ -553,6 +572,12 @@ export default function Produits() {
                   <input type="date" value={productForm.date_peremption} onChange={e => setProductForm(f => ({ ...f, date_peremption: e.target.value }))}
                     className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
                 </div>
+                <div className="xl:col-span-2">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Code-barres</label>
+                  <input type="text" value={productForm.code_barre} onChange={e => setProductForm(f => ({ ...f, code_barre: e.target.value }))}
+                    placeholder="EAN / Code-barres"
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-2">
@@ -580,11 +605,17 @@ export default function Produits() {
                       className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'archives' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                       Archives ({archivedProduits.length})
                     </button>
+                    <button onClick={() => { setTab('inventaire'); loadInventaire() }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'inventaire' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                      Inventaire
+                    </button>
                   </div>
                   <p className="text-xs text-slate-500">
                     {tab === 'actifs'
                       ? `${filteredProduits.filter(p => Number(p.stock_actuel || 0) <= Number(p.stock_minimum || 0)).length} en alerte`
-                      : `${archivedProduits.length} archive${archivedProduits.length > 1 ? 's' : ''}`
+                      : tab === 'archives'
+                      ? `${archivedProduits.length} archive${archivedProduits.length > 1 ? 's' : ''}`
+                      : 'Comparer stock theorique et reel'
                     }
                   </p>
                 </div>
@@ -597,7 +628,7 @@ export default function Produits() {
                 )}
               </div>
 
-              <div className="overflow-x-auto">
+              {tab !== 'inventaire' && (<><div className="overflow-x-auto">
                 <table className="w-full min-w-[1000px] table-fixed text-sm">
                   <colgroup>
                     <col style={{ width: '8%' }} />
@@ -695,6 +726,101 @@ export default function Produits() {
                   </div>
                 </div>
               )}
+              </>)}
+
+              {tab === 'inventaire' && (
+                <div>
+                  <div className="px-5 py-4 border-b border-slate-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">Inventaire physique</h3>
+                      <p className="text-xs text-slate-500 mt-1">Saisissez le stock reel pour chaque produit, puis validez les ajustements.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Filtrer..."
+                        value={inventaireFilter}
+                        onChange={e => setInventaireFilter(e.target.value)}
+                        className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 w-48"
+                      />
+                      <button
+                        onClick={async () => {
+                          const diffs = Object.entries(inventaireEdits)
+                            .filter(([id, val]) => {
+                              const p = inventaireData.find(p => p.id === Number(id))
+                              return p && val !== '' && Number(val) !== p.stock_actuel
+                            })
+                            .map(([id, val]) => ({ produit_id: Number(id), stock_reel: Number(val) }))
+                          if (diffs.length === 0) { toast('Aucun ajustement a appliquer.', 'info'); return }
+                          if (!(await confirm(`Appliquer ${diffs.length} ajustement${diffs.length > 1 ? 's' : ''} de stock ?`))) return
+                          setSavingInventaire(true)
+                          try {
+                            const result = await window.api.inventaireAdjust(diffs)
+                            toast(`${result.adjusted} produit${result.adjusted > 1 ? 's' : ''} ajuste${result.adjusted > 1 ? 's' : ''}.`, 'success')
+                            await loadInventaire()
+                            await load()
+                          } catch (e) { toast(e.message, 'error') }
+                          finally { setSavingInventaire(false) }
+                        }}
+                        disabled={savingInventaire || Object.keys(inventaireEdits).length === 0}
+                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                      >
+                        {savingInventaire ? 'Application...' : 'Valider les ajustements'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs font-medium text-slate-400 border-b border-slate-700 bg-slate-850">
+                          <th className="text-left py-3 px-4">Produit</th>
+                          <th className="text-left py-3 px-2">Categorie</th>
+                          <th className="text-left py-3 px-2">Unite</th>
+                          <th className="text-right py-3 px-2">Stock theorique</th>
+                          <th className="text-right py-3 px-2">Stock reel</th>
+                          <th className="text-center py-3 px-2">Ecart</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inventaireData
+                          .filter(p => !inventaireFilter || (p.nom + ' ' + (p.reference || '') + ' ' + (p.categorie || '')).toLowerCase().includes(inventaireFilter.toLowerCase()))
+                          .map(p => {
+                            const stockReel = inventaireEdits[p.id] !== undefined ? inventaireEdits[p.id] : ''
+                            const ecart = stockReel !== '' ? Number(stockReel) - p.stock_actuel : null
+                            return (
+                              <tr key={p.id} className="border-b border-slate-700/50 hover:bg-slate-750">
+                                <td className="py-2 px-4">
+                                  <div className="font-medium text-white">{p.nom}</div>
+                                  {p.reference && <div className="text-xs text-slate-500">{p.reference}</div>}
+                                </td>
+                                <td className="py-2 px-2 text-xs text-slate-400">{p.categorie || '-'}</td>
+                                <td className="py-2 px-2 text-xs text-slate-400">{p.unite || '-'}</td>
+                                <td className="py-2 px-2 text-right text-slate-300 tabular-nums">{p.stock_actuel}</td>
+                                <td className="py-2 px-2">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder={String(p.stock_actuel)}
+                                    value={stockReel}
+                                    onChange={e => setInventaireEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                    className="w-20 ml-auto block bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-sm text-white text-right"
+                                  />
+                                </td>
+                                <td className="py-2 px-2 text-center text-sm tabular-nums">
+                                  {ecart !== null && (
+                                    <span className={ecart > 0 ? 'text-emerald-400' : ecart < 0 ? 'text-red-400' : 'text-slate-500'}>
+                                      {ecart > 0 ? '+' : ''}{ecart}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Product detail sheet (side panel) */}
@@ -757,6 +883,12 @@ export default function Produits() {
                     <label className="block text-xs font-medium text-slate-400 mb-1">Peremption</label>
                     <input type="date" value={sheetForm.date_peremption} onChange={e => setSheetForm(f => ({ ...f, date_peremption: e.target.value }))}
                       className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Code-barres</label>
+                    <input type="text" value={sheetForm.code_barre} onChange={e => setSheetForm(f => ({ ...f, code_barre: e.target.value }))}
+                      placeholder="EAN / Code-barres"
+                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
                   </div>
                 </div>
 
