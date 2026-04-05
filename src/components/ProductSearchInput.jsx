@@ -108,7 +108,7 @@ export default function ProductSearchInput({ produits, value, onChange, placehol
         }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500"
+        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 truncate"
       />
       {open && filtered.length > 0 && (
         <div

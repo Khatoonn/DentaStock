@@ -142,7 +142,7 @@ function CommandeLineItem({ item, produits, remises, onChange, onRemove, showRec
 
   return (
     <tr className="border-b border-slate-700">
-      <td className="py-2 pr-2">
+      <td className="py-2 pr-2 overflow-hidden max-w-0">
         <ProductSearchInput
           produits={produits}
           value={item.produit_id}
@@ -153,7 +153,7 @@ function CommandeLineItem({ item, produits, remises, onChange, onRemove, showRec
               prix_unitaire: p ? p.prix_unitaire : 0,
             })
           }}
-          placeholder="Nom, reference ou code-barre..."
+          placeholder="Nom, ref. ou code-barre..."
         />
       </td>
       <td className="py-2 px-2 text-xs text-slate-400 whitespace-nowrap">{produit.unite || '-'}</td>
@@ -211,7 +211,7 @@ function ReceptionLineItem({ item, produits, onChange, onRemove }) {
 
   return (
     <tr className="border-b border-slate-700">
-      <td className="py-2 pr-2">
+      <td className="py-2 pr-2 overflow-hidden max-w-0">
         <ProductSearchInput
           produits={produits}
           value={item.produit_id}
@@ -222,7 +222,7 @@ function ReceptionLineItem({ item, produits, onChange, onRemove }) {
               prix_unitaire: p ? p.prix_unitaire : 0,
             })
           }}
-          placeholder="Nom, reference ou code-barre..."
+          placeholder="Nom, ref. ou code-barre..."
         />
       </td>
       <td className="py-2 px-2 text-xs text-slate-400 whitespace-nowrap">{produit.unite || '-'}</td>
@@ -971,15 +971,15 @@ export default function Reception() {
 
             {(() => { const hasReceivedCol = editingCommandeId && commandeForm.items.some(i => Number(i.quantite_recue || 0) > 0); return (
             <div className="overflow-x-auto rounded-lg border border-slate-700">
-              <table className="w-full min-w-[860px] xl:min-w-[980px] table-fixed text-sm">
+              <table className="w-full min-w-[700px] table-fixed text-sm">
                 <colgroup>
-                  <col style={{ width: hasReceivedCol ? '38%' : '46%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '10%' }} />
-                  {hasReceivedCol && <col style={{ width: '12%' }} />}
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '12%' }} />
-                  <col style={{ width: '4%' }} />
+                  <col className={hasReceivedCol ? 'w-[32%]' : 'w-[38%]'} />
+                  <col className="w-[7%]" />
+                  <col className="w-[11%]" />
+                  {hasReceivedCol && <col className="w-[11%]" />}
+                  <col className="w-[14%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[4%]" />
                 </colgroup>
                 <thead className="bg-slate-750">
                   <tr className="text-xs font-medium text-slate-400 border-b border-slate-700">
@@ -1122,16 +1122,16 @@ export default function Reception() {
             </div>
 
             <div className="overflow-x-auto rounded-lg border border-slate-700">
-              <table className="w-full min-w-[940px] xl:min-w-[1080px] table-fixed text-sm">
+              <table className="w-full min-w-[700px] table-fixed text-sm">
                 <colgroup>
-                  <col style={{ width: '28%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '13%' }} />
-                  <col style={{ width: '16%' }} />
-                  <col style={{ width: '9%' }} />
-                  <col style={{ width: '2%' }} />
+                  <col className="w-[26%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[4%]" />
                 </colgroup>
                 <thead className="bg-slate-750">
                   <tr className="text-xs font-medium text-slate-400 border-b border-slate-700">
