@@ -1,4 +1,7 @@
 import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+
+const isElectron = typeof window !== 'undefined' && window.api !== undefined
 
 const nav = [
   {
@@ -115,6 +118,24 @@ const nav = [
 ]
 
 export default function Sidebar() {
+  const [version, setVersion] = useState('')
+  const [mode, setMode] = useState('Reseau local')
+
+  useEffect(() => {
+    if (!isElectron) return
+    if (window.api.updatesStatus) {
+      window.api.updatesStatus().then(s => {
+        if (s?.currentVersion) setVersion(s.currentVersion)
+      }).catch(() => {})
+    }
+    if (window.api.setupGetConfig) {
+      window.api.setupGetConfig().then(cfg => {
+        if (cfg?.mode === 'server') setMode('Mode serveur')
+        else if (cfg?.mode === 'client') setMode('Mode client')
+      }).catch(() => {})
+    }
+  }, [])
+
   return (
     <aside className="w-64 bg-slate-800 flex flex-col border-r border-slate-700 shrink-0">
       <div className="drag-region flex items-center gap-3 px-5 py-5 border-b border-slate-700">
@@ -150,7 +171,9 @@ export default function Sidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-slate-700">
-        <div className="text-xs text-slate-500 text-center">v2.3.0 - Reseau local</div>
+        <div className="text-xs text-slate-500 text-center">
+          {version ? `v${version}` : ''}{version && mode ? ' - ' : ''}{mode}
+        </div>
       </div>
     </aside>
   )
