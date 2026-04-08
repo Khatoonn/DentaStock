@@ -88,12 +88,111 @@ function getInstallDir() {
   return path.join(__dirname, '..')
 }
 
+// Dossier de donnees persistant, hors install dir, qui survit aux mises a jour NSIS
+function getDataRoot() {
+  if (app.isPackaged) {
+    const programData = process.env.ProgramData || 'C:\\ProgramData'
+    return path.join(programData, 'DentaStock')
+  }
+  return path.join(__dirname, '..')
+}
+
 function getServerLocalDataPath() {
-  return path.join(getInstallDir(), 'data')
+  return path.join(getDataRoot(), 'data')
 }
 
 function getSetupConfigPath() {
-  return path.join(getInstallDir(), SETUP_CONFIG_FILENAME)
+  return path.join(getDataRoot(), SETUP_CONFIG_FILENAME)
+}
+
+function getLegacyInstallDirPath(name) {
+  return path.join(getInstallDir(), name)
+}
+
+// Migration unique : recupere la config et les donnees laissees dans l'ancien
+// emplacement (install dir) avant qu'une mise a jour NSIS ne les efface.
+function migrateLegacyDataIfNeeded() {
+  if (!app.isPackaged) return
+
+  try {
+    ensureDirectory(getDataRoot())
+
+    // 1) Setup config
+    const newConfigPath = getSetupConfigPath()
+    const oldConfigPath = getLegacyInstallDirPath(SETUP_CONFIG_FILENAME)
+    if (!fs.existsSync(newConfigPath) && fs.existsSync(oldConfigPath)) {
+      try {
+        const raw = fs.readFileSync(oldConfigPath, 'utf-8')
+        const parsed = JSON.parse(raw)
+
+        // Si dataPath pointait vers le dossier data DANS install dir,
+        // copier ce dossier (DB + sous-dossiers) vers le nouveau dataRoot
+        if (parsed && parsed.mode === 'server' && parsed.dataPath) {
+          const oldData = path.resolve(parsed.dataPath)
+          const installDir = path.resolve(getInstallDir())
+          const isInsideInstall = oldData === path.join(installDir, 'data') || oldData.startsWith(installDir + path.sep)
+
+          if (isInsideInstall && fs.existsSync(oldData)) {
+            const newData = getServerLocalDataPath()
+            ensureDirectory(newData)
+            copyDirectoryRecursive(oldData, newData)
+            parsed.dataPath = newData
+            console.log(`[DentaStock] Migration data: ${oldData} -> ${newData}`)
+          }
+        }
+
+        fs.writeFileSync(newConfigPath, JSON.stringify(parsed, null, 2), 'utf-8')
+        console.log(`[DentaStock] Migration setup config: ${oldConfigPath} -> ${newConfigPath}`)
+      } catch (err) {
+        console.error('[DentaStock] Echec migration setup config:', err.message)
+      }
+    }
+
+    // 2) Backups historiques (etaient dans install/data/backups)
+    const oldBackupsDir = path.join(getInstallDir(), 'data', 'backups')
+    const newBackupsDir = getBackupDir()
+    if (fs.existsSync(oldBackupsDir) && oldBackupsDir !== newBackupsDir) {
+      try {
+        ensureDirectory(newBackupsDir)
+        copyDirectoryRecursive(oldBackupsDir, newBackupsDir)
+        console.log(`[DentaStock] Migration backups: ${oldBackupsDir} -> ${newBackupsDir}`)
+      } catch (err) {
+        console.error('[DentaStock] Echec migration backups:', err.message)
+      }
+    }
+
+    // 3) Replica locale (etait dans install/data/replica)
+    const oldReplicaDir = path.join(getInstallDir(), 'data', 'replica')
+    const newReplicaDir = getReplicaDir()
+    if (fs.existsSync(oldReplicaDir) && oldReplicaDir !== newReplicaDir) {
+      try {
+        ensureDirectory(newReplicaDir)
+        copyDirectoryRecursive(oldReplicaDir, newReplicaDir)
+        console.log(`[DentaStock] Migration replica: ${oldReplicaDir} -> ${newReplicaDir}`)
+      } catch (err) {
+        console.error('[DentaStock] Echec migration replica:', err.message)
+      }
+    }
+  } catch (err) {
+    console.error('[DentaStock] Migration legacy data:', err.message)
+  }
+}
+
+function copyDirectoryRecursive(src, dest) {
+  if (!fs.existsSync(src)) return
+  ensureDirectory(dest)
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name)
+    const destPath = path.join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copyDirectoryRecursive(srcPath, destPath)
+    } else if (entry.isFile()) {
+      // Ne pas ecraser si la cible existe deja (priorite au nouveau)
+      if (!fs.existsSync(destPath)) {
+        fs.copyFileSync(srcPath, destPath)
+      }
+    }
+  }
 }
 
 function loadSetupConfig() {
@@ -122,7 +221,7 @@ function getConfiguredClientServerDbPath(config = setupConfig) {
 }
 
 function getReplicaDir() {
-  return path.join(getInstallDir(), 'data', 'replica')
+  return path.join(getDataRoot(), 'replica')
 }
 
 function getReplicaDbPath() {
@@ -266,7 +365,7 @@ function promoteReplicaToServer() {
 
 // --- Sauvegarde mensuelle automatique ---
 function getBackupDir() {
-  return path.join(getInstallDir(), 'data', 'backups')
+  return path.join(getDataRoot(), 'backups')
 }
 
 function getLastMonthlyBackupDate() {
@@ -844,11 +943,11 @@ function cleanupOldData(cutoffDate) {
 }
 
 function getDefaultDbPath() {
-  return path.join(getInstallDir(), 'data', DB_FILENAME)
+  return path.join(getDataRoot(), 'data', DB_FILENAME)
 }
 
 function getDefaultDocumentsRoot() {
-  return path.join(getInstallDir(), 'data', 'documents')
+  return path.join(getDataRoot(), 'data', 'documents')
 }
 
 function getConfiguredStorageRoot() {
@@ -4272,6 +4371,10 @@ app.whenReady().then(async () => {
   const userDataPath = getUserDataPath()
   dbConfigFile = path.join(userDataPath, 'dbpath.txt')
   storageConfigFile = path.join(userDataPath, 'storage-root.txt')
+
+  // Migration : recuperer config + donnees laissees dans l'ancien install dir
+  // (les versions <= 2.5.1 stockaient ces fichiers la, et NSIS les ecrasait a chaque update)
+  migrateLegacyDataIfNeeded()
 
   // Charger la config setup
   setupConfig = loadSetupConfig()

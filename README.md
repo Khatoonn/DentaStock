@@ -2,7 +2,7 @@
 
 Application de gestion de stock pour cabinet dentaire, multi-postes en reseau local (serveur/client).
 
-**[Telecharger l'installateur Windows (v2.5.1)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.5.1)**
+**[Telecharger l'installateur Windows (v2.5.2)](https://github.com/Khatoonn/DentaStock/releases/tag/v2.5.2)**
 
 ## Fonctionnalites
 
@@ -77,7 +77,7 @@ npm run dev
 npm run pack
 ```
 
-Genere `dist/DentaStock-Setup-2.5.1.exe`
+Genere `dist/DentaStock-Setup-2.5.2.exe`
 
 ### Base de demonstration
 
