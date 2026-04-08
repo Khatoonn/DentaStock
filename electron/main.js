@@ -1878,6 +1878,46 @@ function safeHandle(channel, handler) {
   })
 }
 
+// Mises a jour
+safeHandle('updates:check', async () => {
+  try {
+    const autoUpdate = require('./auto-update')
+    const result = await autoUpdate.checkNow()
+    return { ok: true, ...autoUpdate.getStatus(), updateInfo: result?.updateInfo || null }
+  } catch (err) {
+    return { ok: false, error: err.message || 'Erreur de verification' }
+  }
+})
+
+safeHandle('updates:status', () => {
+  try {
+    const autoUpdate = require('./auto-update')
+    return autoUpdate.getStatus()
+  } catch {
+    return { state: 'idle', message: '', currentVersion: app.getVersion() }
+  }
+})
+
+safeHandle('updates:download', async () => {
+  try {
+    const autoUpdate = require('./auto-update')
+    await autoUpdate.downloadNow()
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+safeHandle('updates:install', () => {
+  try {
+    const autoUpdate = require('./auto-update')
+    autoUpdate.installNow()
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 // Config
 safeHandle('config:get', (_, cle) => {
   const row = dbGet('SELECT valeur FROM config WHERE cle = ?', [cle])

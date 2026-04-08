@@ -89,6 +89,8 @@ export default function Parametres() {
   const [profileForm, setProfileForm] = useState(createEmptyProfileForm)
   const [editingProfileId, setEditingProfileId] = useState(null)
   const [savingProfile, setSavingProfile] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState({ state: 'idle', message: '', currentVersion: '' })
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -133,6 +135,46 @@ export default function Parametres() {
       window.removeEventListener('dentastock-session-changed', refresh)
     }
   }, [])
+
+  useEffect(() => {
+    if (!isElectron || !window.api.updatesStatus) return
+
+    void window.api.updatesStatus().then(setUpdateStatus).catch(() => {})
+
+    if (window.api.onUpdateStatus) {
+      const unsubscribe = window.api.onUpdateStatus(payload => {
+        setUpdateStatus(current => ({ ...current, ...payload }))
+      })
+      return unsubscribe
+    }
+  }, [])
+
+  const checkForUpdates = async () => {
+    if (!isElectron || !window.api.updatesCheck) {
+      toast('Verification des mises a jour disponible uniquement dans l application installee.', 'info')
+      return
+    }
+    setCheckingUpdate(true)
+    try {
+      const result = await window.api.updatesCheck()
+      if (!result.ok) {
+        toast(result.error || 'Impossible de verifier les mises a jour.', 'error')
+      } else if (result.state === 'up-to-date') {
+        toast('Vous utilisez deja la derniere version.', 'success')
+      } else if (result.state === 'available') {
+        toast(`Mise a jour ${result.version} disponible.`, 'success')
+      }
+    } catch (err) {
+      toast(err.message || 'Erreur lors de la verification.', 'error')
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const installUpdate = async () => {
+    if (!isElectron || !window.api.updatesInstall) return
+    await window.api.updatesInstall()
+  }
 
   const pickDirectory = async () => {
     if (!isElectron) return
@@ -353,6 +395,72 @@ export default function Parametres() {
           </div>
         </div>
       )}
+
+      {/* Mises a jour */}
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-12 h-12 rounded-xl bg-violet-500/15 flex items-center justify-center shrink-0">
+              <svg className="w-6 h-6 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-white">Mises a jour</div>
+              <div className="text-sm text-slate-400 mt-0.5">
+                Version actuelle : <span className="text-slate-200 font-medium">{updateStatus.currentVersion || '—'}</span>
+              </div>
+              {updateStatus.message && (
+                <div className={`text-xs mt-1 ${
+                  updateStatus.state === 'error' ? 'text-red-400' :
+                  updateStatus.state === 'available' || updateStatus.state === 'downloaded' ? 'text-emerald-400' :
+                  updateStatus.state === 'downloading' ? 'text-violet-300' :
+                  'text-slate-500'
+                }`}>
+                  {updateStatus.message}
+                </div>
+              )}
+              {updateStatus.state === 'downloading' && (
+                <div className="w-64 h-1.5 bg-slate-700 rounded-full mt-2 overflow-hidden">
+                  <div className="h-full bg-violet-500 transition-all" style={{ width: `${updateStatus.progress || 0}%` }} />
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-300 border border-slate-600">
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+              v{updateStatus.currentVersion || '—'} installee
+            </span>
+            {updateStatus.state === 'downloaded' ? (
+              <button
+                onClick={installUpdate}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                Redemarrer et installer v{updateStatus.version}
+              </button>
+            ) : (
+              <button
+                onClick={checkForUpdates}
+                disabled={checkingUpdate || updateStatus.state === 'downloading'}
+                className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+              >
+                {checkingUpdate ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                    </svg>
+                    Verification...
+                  </>
+                ) : (
+                  'Verifier maintenant'
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 min-w-0">

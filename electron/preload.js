@@ -22,6 +22,17 @@ contextBridge.exposeInMainWorld('api', {
   configGet: cle => ipcRenderer.invoke('config:get', cle),
   configSet: (cle, valeur) => ipcRenderer.invoke('config:set', cle, valeur),
 
+  // Mises a jour
+  updatesCheck: () => ipcRenderer.invoke('updates:check'),
+  updatesStatus: () => ipcRenderer.invoke('updates:status'),
+  updatesDownload: () => ipcRenderer.invoke('updates:download'),
+  updatesInstall: () => ipcRenderer.invoke('updates:install'),
+  onUpdateStatus: callback => {
+    const handler = (_, payload) => callback(payload)
+    ipcRenderer.on('updates:status', handler)
+    return () => ipcRenderer.removeListener('updates:status', handler)
+  },
+
   // Profils
   profilesList: () => ipcRenderer.invoke('profiles:list'),
   profilesGetActive: () => ipcRenderer.invoke('profiles:getActive'),
