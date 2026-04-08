@@ -1,6 +1,6 @@
 {
   "name": "dentastock",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Gestion de stock pour cabinet dentaire",
   "author": "DentaStock",
   "main": "electron/main.js",
@@ -53,6 +53,7 @@
       "owner": "Khatoonn",
       "repo": "DentaStock"
     }],
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "nsis": {
       "oneClick": false,
       "perMachine": true,
